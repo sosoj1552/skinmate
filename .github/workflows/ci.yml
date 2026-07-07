@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint-test:
+    name: lint + unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[dev]"
+      - name: ruff
+        run: ruff check .
+      - name: black
+        run: black --check .
+      - name: mypy
+        run: mypy src
+      - name: pytest
+        run: pytest
+
+  db-smoke:
+    name: db extensions smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: build & start db
+        run: docker compose up -d --build db
+      - name: wait healthy
+        run: |
+          for i in $(seq 1 40); do
+            h=$(docker inspect -f '{{.State.Health.Status}}' skinmate-db 2>/dev/null || true)
+            [ "$h" = "healthy" ] && { echo "healthy"; break; }
+            sleep 3
+          done
+      - name: smoke (age + vector)
+        run: bash scripts/db-smoke.sh
