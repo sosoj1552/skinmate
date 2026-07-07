@@ -92,6 +92,7 @@ BEGIN → 관계형 INSERT/UPDATE + pgvector 쓰기 + AGE cypher() 쓰기 → CO
 
 ### 실행 스펙 (착수하는 LLM/개발자용, `docs/`)
 
+- 🧱 [데이터 모델 (Data Model)](docs/DATA-MODEL.md) — **스키마 단일 진실원**: 관계형 6 + 그래프(AGE) + 벡터, 설계 결정 근거
 - 🗂️ [WBS & TODO](docs/WBS.md) — 작업 분해, 우선순위(P0/P1/P2), 의존 그래프, 임계경로, 핵심 우선 작업
 - 📄 [PRD (기능 상세)](docs/PRD.md) — 기능별 목표·사용자 시나리오·비즈니스 로직·예외 처리
 - 🧰 [환경 & 컨벤션](docs/ENVIRONMENT.md) — 기술 스택, 개발환경 셋업, 디렉토리 소유, 코딩 컨벤션

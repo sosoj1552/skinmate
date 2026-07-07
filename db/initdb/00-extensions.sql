@@ -3,5 +3,7 @@
 CREATE EXTENSION IF NOT EXISTS age;
 CREATE EXTENSION IF NOT EXISTS vector;
 
--- AGE 사용 세션 편의를 위한 search_path 기본값
-ALTER DATABASE skinmate SET search_path = ag_catalog, "$user", public;
+-- search_path: public 우선(무자격 CREATE TABLE/DML이 public에 생성되도록).
+-- ag_catalog는 뒤에 둬 agtype 등은 계속 resolve됨. AGE cypher 실행 세션(choke/003)은
+-- 자체적으로 search_path=ag_catalog,... 를 세팅한다.
+ALTER DATABASE skinmate SET search_path = "$user", public, ag_catalog;

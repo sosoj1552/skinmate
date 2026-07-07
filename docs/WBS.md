@@ -58,9 +58,9 @@ Phase 0을 전부 끝낼 필요 없이, 아래 세 개가 완료되는 순간 A/
 |  ☐  | 1A.1   | P1  | 크롤러: **coos.kr + Paula's Choice** + INCI 정규화·중복제거            | 0.5              | 실데이터 적재, 출처·수집일시 기록              |
 |  ☐  | 1A.2   | P1  | 문서·제품 임베딩→pgvector + 유사도 검색(`documents/search.py`)           | 1A.1             | top-k 유사도 비어있지 않음 (AC-D1)        |
 |  ☐  | 1A.3   | P1  | **AC-D1 제형토큰 실측 게이트(≥60%)** → 미달 시 손 보강(=제형 fixture 겸용)      | 1A.2             | 커버리지 측정 리포트 + (필요시) 보강셋          |
-|  ☐  | 1A.4   | P1  | `season_concerns` 손 시드(~10–20행)                              | 0.2              | 비어있지 않은 시드                       |
+|  ☐  | 1A.4   | P1  | 지식 엣지 적재: 문서·크롤에서 `TREATS/AGGRAVATES`·`HELPS/CONFLICTS`를 그래프에 직접 추출·적재 | 0.5, 1A.1        | 그래프 지식 엣지 non-empty              |
 |  ☐  | 1A.5   | P1  | 성분→제품 조회 + **회피성분 완전차단 필터**(관계형)                             | 1A.1             | AC-D2/R2                         |
-|  ☐  | 1A.6   | P0  | 그래프 전역 연결선 재구성(projection) + **2+hop 순회** + 경로→근거문장          | 1A.5, 1A.4       | AC-G1/G2                         |
+|  ☐  | 1A.6   | P0  | `CONTAINS` projection(product_ingredients) + **2+hop 순회**(지식 엣지는 1A.4) + 경로→근거문장 | 1A.5, 1A.4       | AC-G1/G2                         |
 |  ☐  | 1A.7 ⭐ | P1  | **검색 3종 합치기**(벡터+그래프+`rank_memory` 호출) + **제형 soft-ranking** | 1A.2, 1A.6, 1B.5 | `RetrievalContext` 산출 (AC-F1 준비) |
 |  ☐  | 1A.8   | P1  | 자료 테스트(AC-D1/D2/G1/G2) — **개발과 병행**                          | 1A.7             | CI 통과                            |
 |  ☐  | 1A.9   | P2  | (조건부) 순회 p95 초과 시 경로 read-through 캐시                         | 벤치마크             | 2.6에서 미달 시에만                     |
@@ -103,7 +103,7 @@ flowchart LR
         P05 --> A1[1A.1 크롤]
         A1 --> A2[1A.2 임베딩·검색]
         A2 --> A3[1A.3 제형토큰 실측]
-        P02 --> A4[1A.4 season 시드]
+        A1 --> A4[1A.4 지식엣지 적재]
         A1 --> A5[1A.5 지식·하드필터]
         A5 --> A6[1A.6 그래프 2hop]
         A4 --> A6

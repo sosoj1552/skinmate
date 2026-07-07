@@ -108,6 +108,8 @@ skinmate/
 ### 4.2 DB / 트랜잭션 (⭐ 불변식 — 위반 시 PR 리젝)
 - **저장 경로에 autocommit 금지.** 원자 저장은 **한 커넥션에서** `BEGIN → … → COMMIT`, 예외 시 `ROLLBACK`. → [PRD.md](PRD.md) F5.
 - **AGE 접근은 오직 `choke.age_exec(...)` 통로로만.** 앱 코드에서 raw `cypher()` 직접 호출 금지. **CI에 grep 가드**(`rg "cypher\("` 가 choke.py 외부에서 매칭되면 실패).
+- **앱 역할(`skinmate_app`)은 `LOAD 'age'` 호출 금지.** age는 `shared_preload_libraries`로 이미 로드됨 → 비-superuser의 LOAD는 거부된다(스모크 검증). choke는 `SET search_path = ag_catalog, …` 로 세팅하거나 `ag_catalog.cypher(...)` 로 자격 호출만.
+- **무자격 DDL은 `public`에.** DB 기본 search_path가 `"$user", public, ag_catalog` 라 무자격 `CREATE TABLE`은 public에 생성됨(ag_catalog 오염 방지). 마이그레이션도 `SET LOCAL search_path = public` 안전벨트.
 - **개인 데이터 접근엔 항상 `user_id`/`user_scope`.** memories 등 관계형은 RLS 정책, AGE는 choke가 scope 주입.
 - **벡터를 쓰는 모든 행에 `embedding_model_id` 기록.** 모델 스왑은 재-임베딩 마이그레이션으로만.
 - 스키마 변경은 **새 번호 마이그레이션 파일**로만. 기존 파일 수정 금지.

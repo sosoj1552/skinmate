@@ -106,6 +106,8 @@ Existing repo dirs (`chat/`, `ingest/`, `memory/`, `retrieval/`, `contracts/`, `
 
 ## 4. Data Model
 
+> ⚠️ **SUPERSEDED (2026-07-07):** 이 절의 테이블 목록은 2인 재설계로 갱신되었다. 스키마의 **단일 진실원은 [docs/DATA-MODEL.md](docs/DATA-MODEL.md)** 이며 구현은 `db/migrations/`이다. 주요 변경: `seasons`·`season_concerns`·`concerns`·`conversations`·`data_sources` 테이블 삭제(계절·고민은 개인 맥락 memories로, 출처는 각 행 source_meta로); `TREATS/HELPS` 등 지식 엣지는 테이블 없이 **그래프 네이티브**; 서버 **stateless**. 아래 원문은 히스토리로 보존.
+
 ### Decided embedding constants (v1 — independently chosen, not from schema.sql)
 - **`D_DOC` = 1024**, multilingual model (KO+EN). Default: **BAAI/bge-m3** (1024-dim, strong KO+EN, single model for both product prose and docs). *Rationale: one multilingual model avoids a second embedding pipeline and covers Korean skincare prose + English INCI docs.*
 - **`D_ING` = NOT USED in v1.** Ingredient semantics are carried by structured relational columns (grade/function/classification) plus the AGE graph; formulation/texture ranking rides on `D_DOC` product-description embeddings. *Rationale: no query path in the ACs requires ingredient-level vector similarity; dropping D_ING removes an ingestion + storage burden with zero AC cost. Re-add later only if an ingredient-similarity feature emerges.*
