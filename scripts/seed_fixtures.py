@@ -31,7 +31,9 @@ def main() -> None:
             # Apache AGE 그래프 초기화 (존재하면 삭제 후 온톨로지 재생성)
             cur.execute("SET LOCAL search_path = ag_catalog, public;")
             cur.execute("SELECT count(*) FROM ag_graph WHERE name = 'skinmate';")
-            if cur.fetchone()[0] > 0:
+            res_row = cur.fetchone()
+            assert res_row is not None
+            if res_row[0] > 0:
                 cur.execute("SELECT drop_graph('skinmate', true);")
 
             # 003 마이그레이션과 일치하게 그래프 및 라벨 생성
