@@ -10,19 +10,19 @@
 
 | 테이블 | 용도 | 진실원 | 임베딩/그래프 연결 |
 |---|---|---|---|
-| **users** | 사용자 계정 + 피부타입 | ✅ 사용자 | → `User` 노드 |
+| **memories** | 개인 맥락(회피/선호·고민·**피부타입**·**계절**) + 가중치, RLS | ✅ 개인 사실 | → 개인 엣지(AVOIDS/PREFERS/HAS_CONCERN) |
+| **memory_audit** | 기억 CRUD 감사(add/update/delete/no-op, old→new), RLS | ✅ 감사 | 없음 |
 | **ingredients** | 성분 정보(성분명 ko/en·효과·분류·등급·성분소개·canonical_key) | ✅ 성분 | → `Ingredient` 노드 |
 | **products** | 제품 정보(제품명·브랜드·설명) + **설명 embedding(1024)** | ✅ 제품 | → `Product` 노드 / **벡터** |
 | **product_ingredients** | 제품↔성분 junction(FK) | ✅ containment | → `CONTAINS` 엣지 / **하드필터** |
 | **documents** | 성분·제품·피부관리 프로즈 아티클 + **embedding(1024)** | ✅ 문서 | **벡터** + 그래프 지식 추출 원천 |
-| **memories** | 개인 맥락(회피/선호·고민·피부타입·**계절**) + 가중치, RLS | ✅ 개인 사실 | → 개인 엣지(AVOIDS/PREFERS/HAS_CONCERN) |
-| **memory_audit** | 기억 CRUD 감사(add/update/delete/no-op, old→new), RLS | — 감사 | 없음 |
 
-> 표에는 memory_audit 포함 7행이지만 "엔티티/관계 테이블"은 6개 + 감사 1개.
+> **users 테이블 없음.** user_id는 외부 신원(로그인)에서 오는 **스코프 식별자**일 뿐, FK가 아니다. 피부타입 등 사용자 데이터는 전부 `memories`(RLS)에. 그래프 `User` 노드는 memories 투영 시 user_id로 생성(그래프 네이티브).
 
 ### 삭제된 테이블 (그리고 그 내용이 간 곳)
 | 삭제 | 대체 |
 |---|---|
+| users | user_id는 외부 신원 스코프값(FK 아님); 피부타입 등 사용자 데이터는 memories(RLS) |
 | concerns | memories `fact_type='has_concern'` + `target_name`; 그래프 `Concern` 노드(name 키) |
 | seasons · season_concerns | memories `season`(text) 개인 맥락 |
 | conversations | **서버 stateless** — 클라이언트가 히스토리 전달, 퍼널 상태는 매 턴 재계산 |

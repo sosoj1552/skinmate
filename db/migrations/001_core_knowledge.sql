@@ -4,21 +4,15 @@
 -- 규칙: freeze 후 수정 금지 — 변경은 새 번호 마이그레이션으로만.
 --
 -- [재설계 요지]
---  * concerns/seasons/season_concerns/data_sources 테이블 삭제.
---    - 고민(concern)·계절(season)은 개인 맥락 → memories 로(002).
+--  * concerns/seasons/season_concerns/data_sources/users 테이블 삭제.
+--    - 고민(concern)·계절(season)·피부타입(skin_type)은 개인 맥락 → memories 로(002).
 --    - 성분↔고민(TREATS), 성분↔성분(HELPS)은 테이블 없이 그래프 네이티브(003, 인제스트가 직접 적재).
 --    - 출처 메타는 각 행 source_meta(jsonb) 로 흡수.
+--    - users 테이블 없음: user_id 는 외부 신원 스코프값(FK 아님). 사용자 데이터는 전부 memories(RLS).
 --  * 임베딩: D_DOC=1024 고정. products/documents 에만.
 
 BEGIN;
 SET LOCAL search_path = public;  -- 무자격 객체는 public 에 생성 (ag_catalog 오염 방지)
-
--- 사용자 (기억/그래프의 소유 주체)
-CREATE TABLE users (
-    user_id     bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    skin_type   text,                       -- 지성/건성/복합/민감 (nullable)
-    created_at  timestamptz NOT NULL DEFAULT now()
-);
 
 -- 성분 (성분 정보): 성분명·효과·분류·등급·성분소개. v1 임베딩 없음.
 CREATE TABLE ingredients (
