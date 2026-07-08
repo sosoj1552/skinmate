@@ -7,6 +7,7 @@
 --  * 계절 = memories.season(text) 개인 맥락. seasons 테이블 없음.
 --  * conversations 테이블 없음(서버 stateless — 클라이언트가 히스토리 전달, 퍼널은 매 턴 재계산).
 --  * memory_audit 별도 테이블 유지 + RLS(격리 구멍 방지).
+--  * users 테이블 없음: user_id 는 외부 신원 스코프값(FK 아님). 피부타입은 fact_type='skin_type' 기억.
 --  * effective_weight = base_weight * exp(-λ*Δdays), λ=0.05/day. 앱에서 조회 시 계산.
 
 BEGIN;
@@ -14,7 +15,7 @@ SET LOCAL search_path = public;  -- 무자격 객체는 public 에 생성 (ag_ca
 
 -- 기억 종류 (그래프 투영 여부를 가르는 축)
 CREATE TYPE fact_type AS ENUM (
-    'skin_type',            -- 관계형만 (users.skin_type 로도 반영 가능)
+    'skin_type',            -- 피부타입(지성/건성/복합/민감). 관계형만, 그래프 투영 안 함
     'avoid_ingredient',     -- → (:User)-[:AVOIDS]->(:Ingredient)   (target_ingredient_id)
     'prefer_ingredient',    -- → (:User)-[:PREFERS]->(:Ingredient)  (target_ingredient_id)
     'avoid_brand',          -- → (:User)-[:AVOIDS]->(:Brand)        (target_name)
@@ -26,7 +27,7 @@ CREATE TYPE fact_type AS ENUM (
 -- 개인 사실. RLS 로 user_id 격리.
 CREATE TABLE memories (
     memory_id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    user_id             bigint NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    user_id             bigint NOT NULL,       -- 외부 신원 스코프값(users 테이블 없음, FK 아님). RLS 스코프
     content             text NOT NULL,
     fact_type           fact_type NOT NULL,
     slot_key            text,                  -- 동일 슬롯 update 판정용(예: 'avoid:레티놀')

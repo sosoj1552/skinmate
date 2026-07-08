@@ -49,10 +49,12 @@ BEGIN → 관계형 INSERT/UPDATE + pgvector 쓰기 + AGE cypher() 쓰기 → CO
 ```
 큐/워커/drain/dead-letter 없음. 기억 쓰기는 응답 생성 **후** 실행되므로 답변 품질엔 영향 없고, 커밋이 턴 종료 전에 끝나 다음 턴은 항상 최신 기억을 봄(교차턴 staleness 소멸). 대가는 턴당 ~1–3s 지연 — 나중에 `write/writer.py` 뒤에서 async로 승격 가능.
 
-### 관계 그래프 (파생 projection)
-- **관계형 테이블이 진실원**, AGE 엣지는 결정적 projection 잡으로 재빌드(수기 작성 금지)
-- **전역 엣지**: `(:Season)-[:AFFECTS]->(:Concern)` (seasons/season_concerns에서), `CONTAINS`(product_ingredients에서), `TREATS/AGGRAVATES`, `HELPS/CONFLICTS`
-- **기억→그래프 브릿지**: `fact_type='avoid_ingredient'` 기억 행 → 사용자 스코프 `(:User)-[:AVOIDS]->(:Ingredient)` 엣지로 projection (같은 원자 트랜잭션 내, choke-point 경유)
+### 관계 그래프 (하이브리드)
+- **전역 엣지**:
+  - `CONTAINS`(product_ingredients 투영) — 관계형이 진실원, projection으로 재빌드
+  - `TREATS/AGGRAVATES`, `HELPS/CONFLICTS` — **그래프 네이티브**(테이블 없이 인제스트가 문서·크롤에서 추출·적재)
+- **기억→그래프 브릿지**: `fact_type='avoid_ingredient'` 기억 행 → 사용자 스코프 `(:User)-[:AVOIDS]->(:Ingredient)` 엣지로 projection (같은 원자 트랜잭션 내, choke-point 경유). `has_concern`은 `{season?}` 프로퍼티 포함
+- *(seasons·season_concerns·concerns 테이블 없음 — 계절·고민은 개인 맥락 memories로. 스키마 진실원은 [docs/DATA-MODEL.md](docs/DATA-MODEL.md))*
 - **제형(제형)은 그래프 노드가 아님** — 제품 설명 임베딩 유사도로만 근사(best-effort). 하드 0건 보장은 **성분만**
 
 ### 사용자 격리 (하드 불변식)
@@ -63,14 +65,14 @@ BEGIN → 관계형 INSERT/UPDATE + pgvector 쓰기 + AGE cypher() 쓰기 → CO
 
 - **크롤 소스(확정)**: [coos.kr](https://coos.kr/) (성분 canonical 키 + 한글명/등급) + [Paula's Choice Beautypedia](https://www.paulaschoice.co.kr/about-beautypedia) (성분 해설 문서 + 제품 제형 서술)
 - robots.txt 없음 → 정중한 크롤(rate-limit ~1–2 req/s, 캐시, User-Agent 명시, 출처·수집일시 저장). *ToS/저작권은 유효 → 비상업 전제, 상업화 시 재검토*
-- `season_concerns`는 수동 시드(~10–20줄). 제형/텍스처 토큰 ≥60% 데이터 적합성 게이트 통과 확인, 미달 시 수동 보강
+- 제형/텍스처 토큰 ≥60% 데이터 적합성 게이트 통과 확인, 미달 시 수동 보강 (계절→고민은 별도 시드 없음 — 대화에서 개인 맥락으로 잡음)
 
 ## 대표 시나리오
 
 > "가을이 되니 건조하다.. 끈적한 제형은 싫어서 오일은 아니었으면 좋겠어. 에멀전 제형인데 보습은 확실한 제품으로 추천해줄래?"
 
 1. 과거 고민·선호 회상(기억) + 현재 질문 이해
-2. 검색: 계절→문제(가을→건조) 순회 + 회피 성분 하드 제외 + 제형 임베딩 랭킹(에멀전>오일) + 보습 성분/제품
+2. 검색: 계절 맥락(가을)+고민(건조) 회상 → 고민→성분→제품 순회(TREATS/CONTAINS) + 회피 성분 하드 제외 + 제형 임베딩 랭킹(에멀전>오일)
 3. 근거 기반 답변 — 순회 경로와 회상된 기억을 근거로 제시
 
 ## 수용 기준 (요약)

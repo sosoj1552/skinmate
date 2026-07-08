@@ -22,15 +22,13 @@ app_scoped() {  # $1=user_id, $2=sql
 echo "[1/5] core tables present"
 cnt=$("${SU[@]}" -c "SELECT count(*) FROM information_schema.tables
                      WHERE table_schema='public' AND table_name IN
-                     ('users','ingredients','products','product_ingredients',
+                     ('ingredients','products','product_ingredients',
                       'documents','memories','memory_audit');")
-[ "$cnt" = "7" ] || { echo "ERROR: expected 7 core tables, found $cnt"; exit 1; }
+[ "$cnt" = "6" ] || { echo "ERROR: expected 6 core tables, found $cnt"; exit 1; }
 
-echo "[2/5] seed 2 users (superuser)"
-"${SU[@]}" -c "INSERT INTO users(skin_type) VALUES ('oily'),('dry');" >/dev/null
-u1=$("${SU[@]}" -c "SELECT min(user_id) FROM users;")
-u2=$("${SU[@]}" -c "SELECT max(user_id) FROM users;")
-[ "$u1" != "$u2" ] || { echo "ERROR: need 2 distinct users"; exit 1; }
+echo "[2/5] two user scope ids (users 테이블 없음 — user_id는 외부 스코프값)"
+u1=1001
+u2=1002
 
 echo "[3/5] RLS isolation as skinmate_app"
 # u1 스코프로 기억 1건 삽입

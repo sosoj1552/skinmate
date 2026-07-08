@@ -10,7 +10,7 @@
 ## 파일
 | 번호 | 파일 | 담당 | 내용 |
 |---|---|---|---|
-| 001 | `001_core_knowledge.sql` | A | users·ingredients·products·product_ingredients·documents + 벡터 인덱스 |
+| 001 | `001_core_knowledge.sql` | A | ingredients·products·product_ingredients·documents + 벡터 인덱스 (users 테이블 없음 — user_id는 외부 스코프값) |
 | 002 | `002_memory_and_rls.sql` | B(초안)→A(통합) | fact_type enum·memories·memory_audit + RLS(격리) |
 | 003 | `003_graph_ontology.sql` | A | AGE 그래프 `skinmate` + 노드/엣지 라벨(멱등) |
 | 004 | `004_app_role_and_grants.sql` | A | `skinmate_app` 역할(비-superuser, NOBYPASSRLS) + 권한 |
