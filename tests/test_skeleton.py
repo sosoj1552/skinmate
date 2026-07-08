@@ -13,7 +13,7 @@ def test_package_version() -> None:
 
 
 def test_settings_defaults() -> None:
-    s = Settings(_env_file=None)  # .env 무시, 기본값만
+    s = Settings(_env_file=None)  # type: ignore[call-arg]  # .env 무시, 기본값만
     assert s.embedder_mode in {"local", "container", "api"}
     assert s.llm_model
 

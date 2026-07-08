@@ -9,7 +9,7 @@ from skinmate.documents.search import search_documents
 
 def test_search_documents_integration() -> None:
     """실제 DB에 쿼리를 날려 pgvector 코사인 유사도 검색이 정상 구동되는지 검증합니다.
-    
+
     기본적으로 stub 모드가 켜진 상태(더미 벡터 반환)에서 SQL 실행 및 응답 포맷을 검증합니다.
     """
     db_url = os.getenv(
@@ -31,10 +31,11 @@ def test_search_documents_integration() -> None:
         assert "content" in doc
         assert "similarity" in doc
         assert "source_meta" in doc
-        
+
         assert isinstance(doc["doc_id"], int)
         assert isinstance(doc["content"], str)
         assert isinstance(doc["similarity"], float)
-        
-        # 코사인 유사도 범위 유효성 검증 [-1.0, 1.0] 내외 (또는 1.0 - distance 이므로 범위가 올바른지)
+
+        # 코사인 유사도 범위 유효성 검증 [-1.0, 1.0] 내외
+        # (또는 1.0 - distance 이므로 범위가 올바른지)
         assert -2.0 <= doc["similarity"] <= 2.0
