@@ -45,11 +45,11 @@ Phase 0을 전부 끝낼 필요 없이, 아래 세 개가 완료되는 순간 A/
 
 |  ☐  | ID    |  P  | 할 일                                                                                                                                         | 담당                          | 선행  | 완료 조건                |
 | :-: | ----- | :-: | ------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- | --- | -------------------- |
-|  ☐  | 0.1   | P0  | 레포 뼈대 + docker-compose(PG16+AGE+pgvector 버전핀) + **CI 파이프라인** + 로컬 bge-m3 로딩 스파이크 + `llm/` 껍데기                                               | 공동                          | —   | 둘 다 로컬 DB 기동 + CI 그린 |
-|  ☐  | 0.2 ⭐ | P0  | **테이블 구조 확정→고정**: `db/migrations/001~` (확장·전체 표·RLS·그래프 `skinmate`)                                                                         | A (memories DDL은 B 초안→A 통합) | 0.1 | 양쪽 리뷰 승인, freeze 선언  |
-|  ☐  | 0.3 ⭐ | P0  | **데이터 형식(contracts) + 가짜데이터(fixture)**: `RetrievalContext`·`IngredientRef`·`GraphPath`·`fact_type` enum·`RankedFact` + **스텁↔실물 계약테스트를 CI에** | 공동                          | 0.2 | 계약 문서 + CI 계약테스트 통과  |
-|  ☐  | 0.4   | P1  | 임베딩 상수 기록(bge-m3/1024, `embedding_model_id`) + 크롤 태세 확정(예의·rate-limit·캐시·출처메타, ToS 비상업)                                                     | A                           | 0.1 | 설계 메모                |
-|  ☐  | 0.5 ⭐ | P0  | **조기 납품**: `choke.py`·`embed.py` 인터페이스+최소동작 + 소량 공용 샘플(성분·제품 조금·사용자 2명)                                                                     | A                           | 0.3 | B가 import하여 개발 가능    |
+|  [x]  | 0.1   | P0  | 레포 뼈대 + docker-compose(PG16+AGE+pgvector 버전핀) + **CI 파이프라인** + 로컬 bge-m3 로딩 스파이크 + `llm/` 껍데기                                               | 공동                          | —   | 둘 다 로컬 DB 기동 + CI 그린 |
+|  [x]  | 0.2 ⭐ | P0  | **테이블 구조 확정→고정**: `db/migrations/001~` (확장·전체 표·RLS·그래프 `skinmate`)                                                                         | A (memories DDL은 B 초안→A 통합) | 0.1 | 양쪽 리뷰 승인, freeze 선언  |
+|  [x]  | 0.3 ⭐ | P0  | **데이터 형식(contracts) + 가짜데이터(fixture)**: `RetrievalContext`·`IngredientRef`·`GraphPath`·`fact_type` enum·`RankedFact` + **스텁↔실물 계약테스트를 CI에** | 공동                          | 0.2 | 계약 문서 + CI 계약테스트 통과  |
+|  [x]  | 0.4   | P1  | 임베딩 상수 기록(bge-m3/1024, `embedding_model_id`) + 크롤 태세 확정(예의·rate-limit·캐시·출처메타, ToS 비상업)                                                     | A                           | 0.1 | 설계 메모                |
+|  [x]  | 0.5 ⭐ | P0  | **조기 납품**: `choke.py`·`embed.py` 인터페이스+최소동작 + 소량 공용 샘플(성분·제품 조금·사용자 2명)                                                                     | A                           | 0.3 | B가 import하여 개발 가능    |
 
 ### Phase 1A — 데이터 담당(A)
 
