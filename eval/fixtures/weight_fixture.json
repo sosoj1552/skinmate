@@ -1,0 +1,15 @@
+{
+  "_doc": "AC-M2 결정적 가중치 순위 검증용. effective_weight = base_weight × exp(-0.05 × days_ago). now 기준 days_ago 만큼 과거 last_seen 으로 시드한다. B 소유(ACCEPTANCE §4).",
+  "lambda_per_day": 0.05,
+  "now": "2026-07-08T00:00:00+00:00",
+  "memories": [
+    { "content": "최근 언급·기본 가중치", "fact_type": "other", "base_weight": 1.0, "days_ago": 0 },
+    { "content": "오래된 언급·높은 가중치", "fact_type": "other", "base_weight": 2.0, "days_ago": 14 },
+    { "content": "오래된 언급·기본 가중치", "fact_type": "other", "base_weight": 1.0, "days_ago": 14 }
+  ],
+  "expected_order": [
+    "최근 언급·기본 가중치",
+    "오래된 언급·높은 가중치",
+    "오래된 언급·기본 가중치"
+  ]
+}
