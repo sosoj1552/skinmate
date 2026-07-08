@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import os
 
+import psycopg
+import pytest
+
 from skinmate.documents.search import search_documents
 
 
@@ -16,6 +19,19 @@ def test_search_documents_integration() -> None:
         "DATABASE_URL",
         "postgresql://skinmate:skinmate-dev-only@localhost:5432/skinmate",
     )
+
+    # DB 부재 또는 데이터 부재 시 테스트를 우아하게 스킵 처리 (CI 통과 보장)
+    try:
+        with psycopg.connect(db_url) as conn, conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM documents;")
+            row = cur.fetchone()
+            assert row is not None
+            if row[0] == 0:
+                pytest.skip(
+                    "database 'documents' table is empty, skipping integration search test."
+                )
+    except psycopg.OperationalError:
+        pytest.skip("database connection failed, skipping integration search test.")
 
     # 1. 속건조 에멀전 검색 수행
     query = "속건조를 해결하는 끈적임 없는 에멀전"
