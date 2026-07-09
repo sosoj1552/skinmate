@@ -7,6 +7,7 @@ user_scope를 통해 사용자 간 격리를 보장합니다.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 import psycopg
@@ -45,9 +46,14 @@ def age_exec(
         cur.execute("SET LOCAL search_path = ag_catalog, public;")
 
         # 2. cypher() 함수를 사용한 쿼리 실행
-        # SELECT * FROM cypher('graph_name', 'query', 'params_json') AS (n agtype);
-        sql = "SELECT * FROM cypher('skinmate', %s, %s) AS (result agtype);"
-        cur.execute(sql, (cypher_query, params_json))
+        # Apache AGE 규약 상 두 번째 인자는 문자열 리터럴,
+        # 세 번째 인자는 매개변수 바인딩이어야 합니다.
+        if params_with_scope:
+            sql = f"SELECT * FROM cypher('skinmate', $${cypher_query}$$, %s) AS (result agtype);"
+            cur.execute(sql, (params_json,))
+        else:
+            sql = f"SELECT * FROM cypher('skinmate', $${cypher_query}$$) AS (result agtype);"
+            cur.execute(sql)
 
         # 3. 결과 반환
         results = []
@@ -57,8 +63,11 @@ def age_exec(
             if isinstance(val, dict):
                 results.append(val)
             elif isinstance(val, str):
+                # Apache AGE의 agtype 접미사(예: ::map, ::vertex)가 붙어
+                # 파싱 오류가 발생하는 것을 방지
+                cleaned_val = re.sub(r"::[a-zA-Z0-9_]+$", "", val.strip())
                 try:
-                    results.append(json.loads(val))
+                    results.append(json.loads(cleaned_val))
                 except json.JSONDecodeError:
                     results.append({"value": val})
             else:
