@@ -54,6 +54,21 @@ def main() -> None:
             for lbl in elabels:
                 cur.execute(f"SELECT create_elabel('skinmate', '{lbl}');")
 
+            # drop_graph+create_graph 는 'skinmate' 스키마를 통째로 새로 만들어,
+            # 004_app_role_and_grants.sql 이 예전 스키마 객체에 걸어둔 skinmate_app 권한이
+            # 사라진다(재시드마다 반복되는 문제). 그래프 재생성 직후 동일 GRANT 를 재적용해
+            # 앱 역할(RLS 적용 역할)이 choke.age_exec 로 계속 접근 가능하게 한다.
+            cur.execute("""
+                GRANT USAGE ON SCHEMA skinmate TO skinmate_app;
+                GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA skinmate
+                    TO skinmate_app;
+                GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA skinmate TO skinmate_app;
+                ALTER DEFAULT PRIVILEGES IN SCHEMA skinmate
+                    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO skinmate_app;
+                ALTER DEFAULT PRIVILEGES IN SCHEMA skinmate
+                    GRANT USAGE, SELECT ON SEQUENCES TO skinmate_app;
+                """)
+
             # ── 2. 관계형 데이터 적재 ──────────────────────────────────────
             print("2. Seeding relational tables...")
             cur.execute("SET LOCAL search_path = public;")
