@@ -222,4 +222,91 @@ def populate_global_knowledge(conn: psycopg.Connection[Any]) -> None:
         if partnership_sqls:
             cur.execute("\n".join(partnership_sqls))
 
+        # 7. memories 테이블을 조회하여 개인 User 노드 및
+        # AVOIDS / PREFERS / HAS_CONCERN 엣지 복구 적재 (세미콜론 실행)
+        logger.info("projecting_personal_memories_to_graph")
+        # 가. User 노드 생성
+        cur.execute("SELECT DISTINCT user_id FROM memories WHERE deleted_at IS NULL;")
+        user_ids = [row[0] for row in cur.fetchall()]
+        user_sqls = []
+        for uid in user_ids:
+            user_sqls.append(
+                f"SELECT * FROM cypher('skinmate', $$"
+                f"MERGE (u:User {{id: {int(uid)}}})"
+                f"$$) AS (result agtype);"
+            )
+        if user_sqls:
+            cur.execute("\n".join(user_sqls))
+
+        # 나. AVOIDS 엣지 생성
+        cur.execute("""
+            SELECT m.user_id, i.canonical_key 
+            FROM memories m 
+            JOIN ingredients i ON m.target_ingredient_id = i.ingredient_id 
+            WHERE m.fact_type = 'avoid_ingredient' AND m.deleted_at IS NULL;
+            """)
+        avoid_mems = cur.fetchall()
+        avoid_sqls = []
+        for uid, key in avoid_mems:
+            safe_key = re.sub(r"[^a-z0-9_]+", "", key.lower())
+            if not safe_key:
+                continue
+            avoid_sqls.append(
+                f"SELECT * FROM cypher('skinmate', $$"
+                f"MATCH (u:User {{id: {int(uid)}}}), "
+                f"      (i:Ingredient {{canonical_key: '{safe_key}'}})"
+                f"MERGE (u)-[r:AVOIDS {{user_scope: {int(uid)}}}]->(i)"
+                f"$$) AS (result agtype);"
+            )
+        if avoid_sqls:
+            cur.execute("\n".join(avoid_sqls))
+
+        # 다. PREFERS 엣지 생성
+        cur.execute("""
+            SELECT m.user_id, i.canonical_key 
+            FROM memories m 
+            JOIN ingredients i ON m.target_ingredient_id = i.ingredient_id 
+            WHERE m.fact_type = 'prefer_ingredient' AND m.deleted_at IS NULL;
+            """)
+        prefer_mems = cur.fetchall()
+        prefer_sqls = []
+        for uid, key in prefer_mems:
+            safe_key = re.sub(r"[^a-z0-9_]+", "", key.lower())
+            if not safe_key:
+                continue
+            prefer_sqls.append(
+                f"SELECT * FROM cypher('skinmate', $$"
+                f"MATCH (u:User {{id: {int(uid)}}}), "
+                f"      (i:Ingredient {{canonical_key: '{safe_key}'}})"
+                f"MERGE (u)-[r:PREFERS {{user_scope: {int(uid)}}}]->(i)"
+                f"$$) AS (result agtype);"
+            )
+        if prefer_sqls:
+            cur.execute("\n".join(prefer_sqls))
+
+        # 라. HAS_CONCERN 엣지 생성
+        cur.execute("""
+            SELECT user_id, target_name, season 
+            FROM memories 
+            WHERE fact_type = 'has_concern' AND deleted_at IS NULL;
+            """)
+        concern_mems = cur.fetchall()
+        concern_sqls = []
+        for uid, target_name, season in concern_mems:
+            safe_target = re.sub(r"[^a-z0-9_]+", "", target_name.lower())
+            if not safe_target:
+                continue
+            props = f"user_scope: {int(uid)}"
+            if season:
+                props += f", season: '{safe_str(season)}'"
+            concern_sqls.append(
+                f"SELECT * FROM cypher('skinmate', $$"
+                f"MATCH (u:User {{id: {int(uid)}}}), "
+                f"      (c:Concern {{name: '{safe_target}'}})"
+                f"MERGE (u)-[r:HAS_CONCERN {{{props}}}]->(c)"
+                f"$$) AS (result agtype);"
+            )
+        if concern_sqls:
+            cur.execute("\n".join(concern_sqls))
+
     logger.info("finished_graph_global_knowledge_populate")
