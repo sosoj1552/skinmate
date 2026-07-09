@@ -126,11 +126,17 @@ def _active_val(m: ActiveMemory) -> dict[str, Any]:
 
 
 def apply_decision(
-    conn: psycopg.Connection[Any], user_id: int, decision: CrudDecision
+    conn: psycopg.Connection[Any],
+    user_id: int,
+    decision: CrudDecision,
+    *,
+    target_ingredient_id: int | None = None,
 ) -> int | None:
     """판정을 memories/memory_audit 에 반영(감사 포함). 반환: 영향받은 memory_id.
 
-    커밋하지 않는다(트랜잭션은 writer 1B.4 담당). user_scope 안에서 호출해야 RLS 적용.
+    target_ingredient_id 는 writer(1B.4)가 bridge.resolve_ingredient 로 미리 해석해 전달한다
+    (성분 사실의 그래프 다리 FK, DATA-MODEL §1). 커밋하지 않는다(트랜잭션은 writer 담당).
+    user_scope 안에서 호출해야 RLS 적용.
     """
     fact = decision.fact
     new_val = _fact_val(fact, decision.slot_key)
@@ -144,6 +150,7 @@ def apply_decision(
             slot_key=decision.slot_key,
             season=fact.season,
             target_name=fact.target_name,
+            target_ingredient_id=target_ingredient_id,
         )
         repo.insert_audit(
             conn, user_id=user_id, memory_id=mid, op="add", old_val=None, new_val=new_val
@@ -176,6 +183,7 @@ def apply_decision(
             slot_key=decision.slot_key,
             season=fact.season,
             target_name=fact.target_name,
+            target_ingredient_id=target_ingredient_id,
         )
         repo.insert_audit(
             conn,

@@ -126,6 +126,7 @@ def update_memory(
     slot_key: str | None = None,
     season: str | None = None,
     target_name: str | None = None,
+    target_ingredient_id: int | None = None,
 ) -> None:
     """같은 슬롯의 값 전환(update): 최신값으로 덮고 재언급으로 취급(가중치·빈도 상승)."""
     with conn.cursor() as cur:
@@ -133,6 +134,7 @@ def update_memory(
             """
             UPDATE memories
             SET content = %s, fact_type = %s, slot_key = %s, season = %s, target_name = %s,
+                target_ingredient_id = %s,
                 base_weight = base_weight + %s, frequency = frequency + 1, last_seen = now()
             WHERE memory_id = %s AND deleted_at IS NULL
             """,
@@ -142,6 +144,7 @@ def update_memory(
                 slot_key,
                 season,
                 target_name,
+                target_ingredient_id,
                 MENTION_WEIGHT_INCREMENT,
                 memory_id,
             ),
