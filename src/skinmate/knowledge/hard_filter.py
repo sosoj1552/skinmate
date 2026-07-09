@@ -13,23 +13,19 @@ import psycopg
 from skinmate import db
 
 
-def get_avoided_ingredients_for_user(
-    conn: psycopg.Connection[Any], user_id: int
-) -> list[int]:
+def get_avoided_ingredients_for_user(conn: psycopg.Connection[Any], user_id: int) -> list[int]:
     """사용자가 등록한 기피 성분(avoid_ingredient)의 ID 목록을 조회합니다.
 
     RLS 세션 격리를 활성화하기 위해 db.user_scope 내에서 쿼리가 실행되어야 합니다.
     """
     with db.user_scope(conn, user_id), conn.cursor() as cur:
-        cur.execute(
-            """
+        cur.execute("""
                 SELECT DISTINCT target_ingredient_id
                 FROM memories
                 WHERE fact_type = 'avoid_ingredient'
                   AND target_ingredient_id IS NOT NULL
                   AND deleted_at IS NULL;
-                """
-        )
+                """)
         rows = cur.fetchall()
         return [row[0] for row in rows]
 

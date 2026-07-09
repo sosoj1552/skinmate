@@ -57,8 +57,7 @@ def test_populate_global_knowledge_integration(db_conn: psycopg.Connection) -> N
 
         # 2. 테스트용 RDB 데이터 삽입
         cur.execute("SET LOCAL search_path = public;")
-        cur.execute(
-            """
+        cur.execute("""
             INSERT INTO ingredients (canonical_key, name_ko, intro)
             VALUES 
             (
@@ -77,34 +76,29 @@ def test_populate_global_knowledge_integration(db_conn: psycopg.Connection) -> N
             ON CONFLICT (canonical_key) DO UPDATE 
             SET name_ko = EXCLUDED.name_ko, intro = EXCLUDED.intro
             RETURNING canonical_key, ingredient_id;
-            """
-        )
+            """)
         ing_map = {row[0]: row[1] for row in cur.fetchall()}
         hyaluronic_id = ing_map["test_hyaluronic_acid"]
         ing_map["test_ethanol"]
 
-        cur.execute(
-            """
+        cur.execute("""
             INSERT INTO products (name, brand, description)
             VALUES ('테스트 에멀전', '테스트브랜드', '수분 에멀전')
             RETURNING product_id;
-            """
-        )
+            """)
         emulsion_id = cur.fetchone()[0]
 
-        cur.execute(
-            f"""
+        cur.execute(f"""
             INSERT INTO product_ingredients (product_id, ingredient_id) VALUES
             ({emulsion_id}, {hyaluronic_id});
-            """
-        )
+            """)
 
     # 3. 전역 지식 적재 스크립트 실행
     populate_global_knowledge(db_conn)
 
     # 4. Apache AGE 그래프 노드 및 엣지 MERGE 상태 조회 검증 (user_scope=None으로 전역 조회)
     # DatatypeMismatch 방지를 위해 복수 컬럼 대신 Map형태 {key: value}로 리턴합니다.
-    
+
     # 가. Concern 노드 개수 검증
     concerns = choke.age_exec(
         db_conn,

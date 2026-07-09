@@ -130,7 +130,7 @@ def populate_global_knowledge(conn: psycopg.Connection[Any]) -> None:
         for prod_id, name, brand in products:
             prod_sqls.append(
                 f"SELECT * FROM cypher('skinmate', $$"
-                f'MERGE (p:Product {{product_id: {int(prod_id)}}}) '
+                f"MERGE (p:Product {{product_id: {int(prod_id)}}}) "
                 f'SET p.name = "{safe_str(name)}", p.brand = "{safe_str(brand)}"'
                 f"$$) AS (result agtype);"
             )
@@ -138,13 +138,11 @@ def populate_global_knowledge(conn: psycopg.Connection[Any]) -> None:
             cur.execute("\n".join(prod_sqls))
 
         # 4. CONTAINS 엣지 MERGE (100개 청크 단위 세미콜론 실행)
-        cur.execute(
-            """
+        cur.execute("""
             SELECT pi.product_id, i.canonical_key
             FROM product_ingredients pi
             JOIN ingredients i ON pi.ingredient_id = i.ingredient_id;
-            """
-        )
+            """)
         mappings = cur.fetchall()
         logger.info("fetched_contains_mappings_for_graph", count=len(mappings))
 
@@ -155,7 +153,7 @@ def populate_global_knowledge(conn: psycopg.Connection[Any]) -> None:
                 continue
             contains_sqls.append(
                 f"SELECT * FROM cypher('skinmate', $$"
-                f'MATCH (p:Product {{product_id: {int(prod_id)}}}), '
+                f"MATCH (p:Product {{product_id: {int(prod_id)}}}), "
                 f'      (ing:Ingredient {{canonical_key: "{safe_key}"}}) '
                 f"MERGE (p)-[:CONTAINS]->(ing)"
                 f"$$) AS (result agtype);"

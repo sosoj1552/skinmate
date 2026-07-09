@@ -3,4 +3,3 @@
 from skinmate.graph.knowledge_populate import populate_global_knowledge
 
 __all__ = ["populate_global_knowledge"]
-

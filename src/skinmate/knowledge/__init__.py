@@ -6,4 +6,3 @@ from skinmate.knowledge.hard_filter import (
 )
 
 __all__ = ["filter_avoided_products", "get_avoided_ingredients_for_user"]
-
