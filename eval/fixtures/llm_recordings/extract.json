@@ -1,0 +1,68 @@
+{
+  "저는 지성이라 번들거림이 심해요": {
+    "facts": [{"fact_type": "skin_type", "content": "지성 피부라 번들거림이 심함", "target_name": "지성", "season": null}]
+  },
+  "레티놀 쓰면 따가워서 피하고 싶어요": {
+    "facts": [{"fact_type": "avoid_ingredient", "content": "레티놀은 따가워서 회피", "target_name": "레티놀", "season": null}]
+  },
+  "센텔라 들어간 거 쓰면 진정이 잘 돼요": {
+    "facts": [{"fact_type": "prefer_ingredient", "content": "센텔라 성분이 진정에 잘 맞음", "target_name": "센텔라", "season": null}]
+  },
+  "세타필 브랜드는 저랑 안 맞더라고요": {
+    "facts": [{"fact_type": "avoid_brand", "content": "세타필 브랜드가 안 맞음", "target_name": "세타필", "season": null}]
+  },
+  "라운드랩 제품은 만족스러웠어요": {
+    "facts": [{"fact_type": "prefer_brand", "content": "라운드랩 제품에 만족", "target_name": "라운드랩", "season": null}]
+  },
+  "요즘 볼 쪽이 너무 건조해요": {
+    "facts": [{"fact_type": "has_concern", "content": "볼 쪽 건조 고민", "target_name": "건조", "season": null}]
+  },
+  "이마에 트러블이 자꾸 올라와요": {
+    "facts": [{"fact_type": "has_concern", "content": "이마 트러블 고민", "target_name": "트러블", "season": null}]
+  },
+  "향료 들어간 화장품은 트러블이 나요": {
+    "facts": [{"fact_type": "avoid_ingredient", "content": "향료가 들어가면 트러블이 남", "target_name": "향료", "season": null}]
+  },
+  "나이아신아마이드 세럼 효과 좋았어요": {
+    "facts": [{"fact_type": "prefer_ingredient", "content": "나이아신아마이드 세럼 효과 좋음", "target_name": "나이아신아마이드", "season": null}]
+  },
+  "가을 되니까 각질이 일어나요": {
+    "facts": [{"fact_type": "has_concern", "content": "가을철 각질 일어남", "target_name": "각질", "season": "가을"}]
+  },
+  "민감성이라 자극적인 건 못 써요": {
+    "facts": [{"fact_type": "skin_type", "content": "민감성 피부라 자극적인 제품 사용 어려움", "target_name": "민감성", "season": null}]
+  },
+  "알코올 들어간 토너는 화끈거려서 싫어요": {
+    "facts": [{"fact_type": "avoid_ingredient", "content": "알코올 토너는 화끈거려서 회피", "target_name": "알코올", "season": null}]
+  },
+  "모공이 넓어서 고민이에요": {
+    "facts": [{"fact_type": "has_concern", "content": "넓은 모공 고민", "target_name": "모공", "season": null}]
+  },
+  "히알루론산 성분 좋아해요": {
+    "facts": []
+  },
+  "오늘 진짜 피곤하다": {
+    "facts": []
+  },
+  "날씨가 너무 덥네요": {
+    "facts": []
+  },
+  "점심 뭐 먹지 고민돼요": {
+    "facts": [{"fact_type": "has_concern", "content": "점심 메뉴 고민", "target_name": "고민", "season": null}]
+  },
+  "안녕하세요 반가워요": {
+    "facts": []
+  },
+  "주말에 여행 가요": {
+    "facts": []
+  },
+  "고마워요 도움이 됐어요": {
+    "facts": []
+  },
+  "회사 일이 너무 많아요": {
+    "facts": []
+  },
+  "커피 한잔 하고 싶다": {
+    "facts": []
+  }
+}

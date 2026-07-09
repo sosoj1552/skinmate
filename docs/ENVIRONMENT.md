@@ -15,7 +15,7 @@
 | 벡터 | pgvector | PG16 호환 태그로 **정확히 고정** |
 | DB 드라이버 | psycopg | **3.x** (`psycopg[binary]`) — 명시적 트랜잭션 제어 |
 | 임베딩 모델 | BAAI/bge-m3 | **1024-dim**, 다국어(KO+EN). 처음엔 로컬 실행(`sentence-transformers`/`FlagEmbedding`), 이후 컨테이너 |
-| LLM | Claude API | `llm/` 추상화 뒤. 모델 ID는 `claude-sonnet-5` 기본(추론 무거우면 `claude-opus-4-8`) |
+| LLM | Gemini API (무료) | `llm/` 추상화 뒤. Google AI Studio 무료 키 + `google-genai` SDK, 모델 `gemini-2.5-flash` 기본(2.0-flash 는 계정에 따라 무료 티어 미제공). Claude(`ClaudeProvider`)도 대체 구현으로 유지 |
 | API 서버 | FastAPI + uvicorn | `/chat`, `/admin` |
 | 크롤 | httpx (+ 필요시 scrapy) | rate-limit·캐시 |
 | 테스트 | pytest, pytest-cov | 상세는 [ACCEPTANCE-TESTING.md](ACCEPTANCE-TESTING.md) |
@@ -32,7 +32,7 @@
 
 ### 2.1 전제
 - Docker Desktop (Windows 10), Python 3.12, Git.
-- Claude API 키(환경변수 `ANTHROPIC_API_KEY`).
+- Gemini API 키(환경변수 `GEMINI_API_KEY`, Google AI Studio 무료 발급). Claude 대체 구현 사용 시 `ANTHROPIC_API_KEY`.
 
 ### 2.2 순서
 ```bash
@@ -60,7 +60,8 @@ uvicorn skinmate.app.main:app --reload
 ### 2.3 환경변수 (`.env`, 커밋 금지)
 | 변수                  | 용도                                                  |
 | ------------------- | --------------------------------------------------- |
-| `ANTHROPIC_API_KEY` | Claude API                                          |
+| `GEMINI_API_KEY`    | Gemini API (기본, Google AI Studio 무료 키)          |
+| `ANTHROPIC_API_KEY` | Claude API (대체 구현 사용 시)                        |
 | `DATABASE_URL`      | `postgresql://skinmate:...@localhost:5432/skinmate` |
 | `EMBEDDER_MODE`     | `local`(기본) / `container` / `api` — ⭐9d 스왑 스위치      |
 | `EMBEDDER_ENDPOINT` | container/api 모드일 때 URL                             |
@@ -83,7 +84,7 @@ skinmate/
 │   ├── memory/                 # crud, weight, repository                   [B]
 │   ├── write/                  # writer.py 원자 저장(⭐4)                    [B]
 │   ├── chat/                   # orchestrator, rationale                    [B]
-│   ├── llm/                    # Claude 추상화                              [B]
+│   ├── llm/                    # LLM 추상화(Gemini 기본, Claude 대체)        [B]
 │   ├── contracts/              # 공유 데이터 형식(⭐7)                       [공동]
 │   └── app/                    # FastAPI                                    [B]
 ├── ingest/                     # sources/, normalize.py                     [A]

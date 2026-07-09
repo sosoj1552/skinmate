@@ -11,11 +11,12 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str = "postgresql://skinmate_app:skinmate-app-dev-only@localhost:5432/skinmate"
-    anthropic_api_key: str = ""
+    gemini_api_key: str = ""  # 기본 LLM(Google AI Studio 무료 키)
+    anthropic_api_key: str = ""  # Claude 대체 구현 사용 시
     embedder_mode: str = "local"  # local | container | api  (⭐9d)
     embedder_endpoint: str = ""
     crawl_rate_limit: float = 1.5
-    llm_model: str = "claude-sonnet-5"
+    llm_model: str = "gemini-2.5-flash"
 
 
 settings = Settings()
