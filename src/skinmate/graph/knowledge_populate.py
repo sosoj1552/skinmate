@@ -309,4 +309,8 @@ def populate_global_knowledge(conn: psycopg.Connection[Any]) -> None:
         if concern_sqls:
             cur.execute("\n".join(concern_sqls))
 
+        # 8. 전역 지식이 변경되었으므로 모든 유저의 순회 경로 캐시를 전체 리셋(TRUNCATE)합니다.
+        logger.info("invalidating_all_traverse_cache_due_to_global_knowledge_update")
+        cur.execute("TRUNCATE TABLE public.traverse_cache;")
+
     logger.info("finished_graph_global_knowledge_populate")

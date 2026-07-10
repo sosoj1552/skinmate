@@ -213,3 +213,145 @@ def test_traverse_recommendation_paths_integration(db_conn: psycopg.Connection) 
     # 유저 2번은 선호성분과 고민이 등록되어 있지 않으므로 0건이어야 함
     assert len(prefer_paths_user2) == 0
     assert len(treat_paths_user2) == 0
+
+
+def test_traverse_cache_read_through_and_invalidation(db_conn: psycopg.Connection) -> None:
+    """Read-Through 캐시가 동작하며, memories 변경 및 populate 시 무효화되는지 검증합니다."""
+    # 1. 테스트 셋업 (테스트 데이터 삽입)
+    with db_conn.cursor() as cur:
+        cur.execute("SET LOCAL search_path = public;")
+        cur.execute("""
+            INSERT INTO ingredients (canonical_key, name_ko, intro)
+            VALUES 
+            ('test_cache_ingredient', '테스트캐시성분', '피부 보습에 도움을 줍니다.')
+            ON CONFLICT (canonical_key) DO UPDATE SET name_ko = EXCLUDED.name_ko
+            RETURNING ingredient_id;
+            """)
+        ing_id = cur.fetchone()[0]
+
+        cur.execute("""
+            INSERT INTO products (name, brand, description)
+            VALUES ('테스트캐시제품', '캐시브랜드', '캐시용 수분 크림')
+            RETURNING product_id;
+            """)
+        prod_id = cur.fetchone()[0]
+
+        cur.execute(f"""
+            INSERT INTO product_ingredients (product_id, ingredient_id)
+            VALUES ({prod_id}, {ing_id});
+            """)
+
+        # 유저 999: memories 등록
+        cur.execute(f"""
+            INSERT INTO memories (
+                user_id, content, fact_type, target_ingredient_id, 
+                target_name, season, base_weight, frequency, last_seen
+            )
+            VALUES
+                (999, '캐시성분 선호', 'prefer_ingredient', {ing_id}, 
+                 NULL, NULL, 1.0, 1, NOW());
+            """)
+
+    # 전역 지식 적재 (그래프 투영 및 캐시 Truncate 발생)
+    populate_global_knowledge(db_conn)
+
+    # 2. 최초 조회 (캐시 미스 -> Cypher 실행 -> 캐시 테이블 적재)
+    paths_1 = traverse_recommendation_paths(db_conn, user_id=999)
+    assert len(paths_1) >= 1
+
+    # 캐시 테이블에 적재되었는지 확인
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT paths_json FROM public.traverse_cache " "WHERE user_id = 999 AND season = '';"
+        )
+        row = cur.fetchone()
+        assert row is not None
+        import json
+
+        cached_data = row[0]
+        if isinstance(cached_data, str):
+            cached_data = json.loads(cached_data)
+        assert len(cached_data) == len(paths_1)
+        assert cached_data[0]["nodes"][1]["key"] == "test_cache_ingredient"
+
+    # 3. 두 번째 조회 (캐시 히트)
+    # 캐시 데이터를 변경하여 두 번째 조회 시 캐시에서 나가는지 모킹 검증
+    with db_conn.cursor() as cur:
+        mock_paths = [
+            {
+                "nodes": [
+                    {"kind": "User", "key": "999", "label": "사용자"},
+                    {"kind": "Ingredient", "key": "mocked_ingredient", "label": "모킹성분"},
+                    {"kind": "Product", "key": "999", "label": "모킹제품"},
+                ],
+                "edges": [
+                    {"rel": "PREFERS", "from_idx": 0, "to_idx": 1},
+                    {"rel": "CONTAINS", "from_idx": 2, "to_idx": 1},
+                ],
+            }
+        ]
+        cur.execute(
+            "UPDATE public.traverse_cache SET paths_json = %s "
+            "WHERE user_id = 999 AND season = '';",
+            (json.dumps(mock_paths),),
+        )
+
+    paths_2 = traverse_recommendation_paths(db_conn, user_id=999)
+    assert len(paths_2) == 1
+    # 캐시에서 가져왔으므로 'mocked_ingredient'이어야 함
+    assert paths_2[0].nodes[1].key == "mocked_ingredient"
+
+    # 4. memories 수정에 따른 캐시 무효화(Invalidation) 검증 (트리거 동작)
+    with db_conn.cursor() as cur:
+        cur.execute("""
+            UPDATE memories 
+            SET frequency = 2 
+            WHERE user_id = 999 AND fact_type = 'prefer_ingredient';
+        """)
+
+    # 트리거에 의해 캐시 행이 삭제되었는지 검증
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM public.traverse_cache WHERE user_id = 999 AND season = '';")
+        assert cur.fetchone() is None
+
+    # 5. populate_global_knowledge 수행 시 전체 캐시 Truncate 검증
+    # 캐시 강제 삽입
+    with db_conn.cursor() as cur:
+        cur.execute("""
+            INSERT INTO public.traverse_cache (user_id, season, paths_json)
+            VALUES (999, '', '[]');
+        """)
+
+    # populate_global_knowledge 실행
+    populate_global_knowledge(db_conn)
+
+    # 캐시가 Truncate 되었는지 검증
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM public.traverse_cache WHERE user_id = 999 AND season = '';")
+        assert cur.fetchone() is None
+
+    # 6. RLS 격리(Row Level Security) 검증
+    # 999번 캐시 삽입
+    with db_conn.cursor() as cur:
+        cur.execute("""
+            INSERT INTO public.traverse_cache (user_id, season, paths_json)
+            VALUES (999, '', '[]');
+        """)
+
+    # RLS 시뮬레이션: role을 skinmate_app으로 변경하고 app.current_user_id 설정
+    with db_conn.cursor() as cur:
+        cur.execute("SET ROLE skinmate_app;")
+        cur.execute("SELECT set_config('app.current_user_id', '999', true);")
+        cur.execute("SELECT user_id FROM public.traverse_cache;")
+        rows = cur.fetchall()
+        assert len(rows) == 1
+        assert rows[0][0] == 999
+
+        # 다른 유저인 것처럼 스코프 변경
+        cur.execute("SELECT set_config('app.current_user_id', '888', true);")
+        cur.execute("SELECT user_id FROM public.traverse_cache;")
+        rows_other = cur.fetchall()
+        assert len(rows_other) == 0  # 888번 유저 캐시는 없으므로 0행이어야 함
+
+        # 롤백을 위해 role을 다시 superuser로 복원
+        cur.execute("RESET ROLE;")

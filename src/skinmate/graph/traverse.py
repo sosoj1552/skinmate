@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import psycopg
@@ -19,11 +20,27 @@ def traverse_recommendation_paths(
     user_id: int,
     season: str | None = None,
 ) -> list[GraphPath]:
-    """사용자 격리 영역 내에서 2+hop 그래프 경로를 순회 탐색합니다.
+    """사용자 격리 영역 내에서 2+hop 그래프 경로를 순회 탐색합니다. (Read-Through 캐시 적용)
 
     사용자 기피/선호 성분 매핑, 피부 고민 완화 성분, 대안 성분 우회 경로를 수집하여
     Pydantic GraphPath 객체의 리스트로 반환합니다.
     """
+    season_key = season if season is not None else ""
+
+    # 1. 캐시 조회 시도
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT paths_json FROM public.traverse_cache WHERE user_id = %s AND season = %s;",
+            (user_id, season_key),
+        )
+        row = cur.fetchone()
+        if row is not None:
+            paths_data = row[0]
+            if isinstance(paths_data, str):
+                paths_data = json.loads(paths_data)
+            return [GraphPath.model_validate(p) for p in paths_data]
+
+    # 2. 캐시 미스 시 Cypher 쿼리 수행
     paths: list[GraphPath] = []
 
     # 1. Avoidance Paths (기피 성분 함유 제품 경로)
@@ -176,6 +193,18 @@ def traverse_recommendation_paths(
             paths.append(GraphPath(nodes=nodes, edges=edges))
         except (KeyError, ValueError):
             continue
+
+    # 3. 계산된 결과 캐시에 저장
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO public.traverse_cache (user_id, season, paths_json)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (user_id, season)
+            DO UPDATE SET paths_json = EXCLUDED.paths_json, created_at = CURRENT_TIMESTAMP;
+            """,
+            (user_id, season_key, json.dumps([p.model_dump() for p in paths])),
+        )
 
     return paths
 

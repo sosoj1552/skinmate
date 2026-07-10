@@ -63,7 +63,7 @@ Phase 0을 전부 끝낼 필요 없이, 아래 세 개가 완료되는 순간 A/
 |  [x]  | 1A.6   | P0  | `CONTAINS` projection(product_ingredients) + **2+hop 순회**(지식 엣지는 1A.4) + 경로→근거문장 | 1A.5, 1A.4       | AC-G1/G2                         |
 |  [x]  | 1A.7 ⭐ | P1  | **검색 3종 합치기**(벡터+그래프+`rank_memory` 호출) + **제형 soft-ranking** | 1A.2, 1A.6, 1B.5 | `RetrievalContext` 산출 (AC-F1 준비) |
 |  [x]  | 1A.8   | P1  | 자료 테스트(AC-D1/D2/G1/G2) — **개발과 병행**                          | 1A.7             | CI 통과                            |
-|  ☐  | 1A.9   | P2  | (조건부) 순회 p95 초과 시 경로 read-through 캐시                         | 벤치마크             | 2.6에서 미달 시에만                     |
+|  [x]  | 1A.9   | P2  | (조건부) 순회 p95 초과 시 경로 read-through 캐시                         | 벤치마크             | 2.6에서 미달 시에만                     |
 
 ### Phase 1B — 대화·기억 담당(B)
 
