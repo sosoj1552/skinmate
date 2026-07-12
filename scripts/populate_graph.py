@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import os
+import time
 
 import psycopg
 import structlog
@@ -18,7 +19,10 @@ logger = structlog.get_logger()
 def main() -> None:
     # 1. 환경 변수로부터 DB 접속 정보 획득 (.env 재활용 지원)
     user = os.getenv("POSTGRES_USER", "skinmate")
-    password = os.getenv("POSTGRES_PASSWORD", "skinmate-dev-only")
+    password = os.getenv("POSTGRES_PASSWORD")
+    if not password:
+        logger.error("POSTGRES_PASSWORD is not set")
+        exit(1)
     db_name = os.getenv("POSTGRES_DB", "skinmate")
     port = os.getenv("POSTGRES_PORT", "5432")
     host = os.getenv("POSTGRES_HOST", "localhost")  # 기본값 localhost, Docker 컨테이너 내에서는 db
@@ -27,10 +31,9 @@ def main() -> None:
 
     logger.info("db_seeder_started", host=host, port=port, db=db_name, user=user)
 
-    import time
     # 레이스 컨디션 방지: RDB에 덤프 데이터가 실제로 로드될 때까지 최대 60초 대기
     logger.info("waiting_for_rdb_data_readiness")
-    for attempt in range(60):
+    for _ in range(60):
         try:
             with psycopg.connect(db_url) as conn, conn.cursor() as cur:
                 cur.execute("SELECT count(*) FROM products;")
@@ -53,7 +56,8 @@ def main() -> None:
             pass
         time.sleep(1)
     else:
-        logger.warning("rdb_data_not_ready_timeout_proceeding_anyway")
+        logger.error("rdb_data_not_ready_after_60s")
+        exit(1)
 
     try:
         with psycopg.connect(db_url) as conn:

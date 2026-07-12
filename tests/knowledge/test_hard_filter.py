@@ -2,39 +2,12 @@
 
 from __future__ import annotations
 
-import os
-
 import psycopg
-import pytest
 
 from skinmate.knowledge.hard_filter import (
     filter_avoided_products,
     get_avoided_ingredients_for_user,
 )
-
-
-@pytest.fixture(name="db_conn")
-def fixture_db_conn():
-    """테스트용 DB 연결 피스처. 트랜잭션 격리 및 테스트 후 강제 롤백 처리."""
-    base_url = os.getenv(
-        "DATABASE_URL",
-        "postgresql://skinmate:skinmate-dev-only@localhost:5432/skinmate",
-    )
-    # superuser 권한으로 연결하기 위해 계정/비밀번호 정보 치환
-    if "@" in base_url:
-        prefix, host_part = base_url.split("@", 1)
-        pg_pass = os.getenv("POSTGRES_PASSWORD", "qwerty12345")
-        db_url = f"postgresql://skinmate:{pg_pass}@{host_part}"
-    else:
-        db_url = base_url
-
-    try:
-        with psycopg.connect(db_url, autocommit=False) as conn:
-            yield conn
-            # 테스트 종료 시 자동으로 트랜잭션을 롤백하여 DB 오염 방지
-            conn.rollback()
-    except psycopg.OperationalError:
-        pytest.skip("database connection failed, skipping hard filter unit test.")
 
 
 def test_avoid_ingredient_hard_filter(db_conn: psycopg.Connection) -> None:
@@ -74,6 +47,7 @@ def test_avoid_ingredient_hard_filter(db_conn: psycopg.Connection) -> None:
         # 4. 테스트용 임시 유저(9999)의 기피 성분 기억 등록
         # memories 조작은 RLS scope(user_id=9999) 하에서 실행해야 함
         from skinmate import db
+
         with db.user_scope(db_conn, 9999):
             cur.execute(
                 """

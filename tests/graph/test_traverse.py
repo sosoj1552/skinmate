@@ -2,40 +2,15 @@
 
 from __future__ import annotations
 
-import os
-
 import psycopg
-import pytest
 
+from skinmate import db
 from skinmate.contracts.graph import EdgeRel, NodeKind
 from skinmate.graph.knowledge_populate import populate_global_knowledge
 from skinmate.graph.traverse import (
     generate_rationale_from_path,
     traverse_recommendation_paths,
 )
-
-
-@pytest.fixture(name="db_conn")
-def fixture_db_conn():
-    """테스트용 DB 연결 피스처. superuser 권한(skinmate) 접속 및 테스트 후 자동 롤백."""
-    base_url = os.getenv(
-        "DATABASE_URL",
-        "postgresql://skinmate:skinmate-dev-only@localhost:5432/skinmate",
-    )
-    # superuser 권한으로 연결하기 위해 계정/비밀번호 정보 치환
-    if "@" in base_url:
-        prefix, host_part = base_url.split("@", 1)
-        pg_pass = os.getenv("POSTGRES_PASSWORD", "qwerty12345")
-        db_url = f"postgresql://skinmate:{pg_pass}@{host_part}"
-    else:
-        db_url = base_url
-
-    try:
-        with psycopg.connect(db_url, autocommit=False) as conn:
-            yield conn
-            conn.rollback()
-    except psycopg.OperationalError:
-        pytest.skip("database connection failed, skipping graph traverse unit test.")
 
 
 def test_traverse_recommendation_paths_integration(db_conn: psycopg.Connection) -> None:
@@ -122,27 +97,33 @@ def test_traverse_recommendation_paths_integration(db_conn: psycopg.Connection) 
             """)
 
         # 3. 사용자 memories (회피/선호/고민) 데이터 삽입
-        # 유저 1번:
-        #  - 기피 성분: 테스트에탄올 (test_ethanol)
-        #  - 선호 성분: 테스트히알루론산 (test_hyaluronic_acid)
-        #  - 계절 고민: 가을철 dryness
-        # 유저 2번:
-        #  - 기피 성분: 테스트히알루론산 (test_hyaluronic_acid) -> 1번의 선호성분과 격리 대치됨
-        cur.execute(f"""
-            INSERT INTO memories (
-                user_id, content, fact_type, target_ingredient_id, 
-                target_name, season, base_weight, frequency, last_seen
-            )
-            VALUES
-                (1, '에탄올 피함', 'avoid_ingredient', {ethanol_id}, 
-                 NULL, NULL, 1.0, 1, NOW()),
-                (1, '히알루론산 선호', 'prefer_ingredient', {hyaluronic_id}, 
-                 NULL, NULL, 1.0, 1, NOW()),
-                (1, '가을철 건조', 'has_concern', NULL, 
-                 'dryness', '가을', 1.0, 1, NOW()),
-                (2, '히알루론산 기피', 'avoid_ingredient', {hyaluronic_id}, 
-                 NULL, NULL, 1.0, 1, NOW());
-            """)
+        # memories 조작은 RLS scope 하에서 실행해야 함
+        # 유저 1번: 기피(에탄올), 선호(히알루론산), 고민(가을 건조)
+        with db.user_scope(db_conn, 1):
+            cur.execute(f"""
+                INSERT INTO memories (
+                    user_id, content, fact_type, target_ingredient_id, 
+                    target_name, season, base_weight, frequency, last_seen
+                )
+                VALUES
+                    (1, '에탄올 피함', 'avoid_ingredient', {ethanol_id}, 
+                     NULL, NULL, 1.0, 1, NOW()),
+                    (1, '히알루론산 선호', 'prefer_ingredient', {hyaluronic_id}, 
+                     NULL, NULL, 1.0, 1, NOW()),
+                    (1, '가을철 건조', 'has_concern', NULL, 
+                     'dryness', '가을', 1.0, 1, NOW());
+                """)
+        # 유저 2번: 기피(히알루론산) → 1번의 선호성분과 격리 대치됨
+        with db.user_scope(db_conn, 2):
+            cur.execute(f"""
+                INSERT INTO memories (
+                    user_id, content, fact_type, target_ingredient_id, 
+                    target_name, season, base_weight, frequency, last_seen
+                )
+                VALUES
+                    (2, '히알루론산 기피', 'avoid_ingredient', {hyaluronic_id}, 
+                     NULL, NULL, 1.0, 1, NOW());
+                """)
 
     # 4. 전역 지식 및 사용자 memories 그래프 투영 실행
     populate_global_knowledge(db_conn)
@@ -249,16 +230,17 @@ def test_traverse_cache_read_through_and_invalidation(db_conn: psycopg.Connectio
             VALUES ({prod_id}, {ing_id});
             """)
 
-        # 유저 999: memories 등록
-        cur.execute(f"""
-            INSERT INTO memories (
-                user_id, content, fact_type, target_ingredient_id, 
-                target_name, season, base_weight, frequency, last_seen
-            )
-            VALUES
-                (999, '캐시성분 선호', 'prefer_ingredient', {ing_id}, 
-                 NULL, NULL, 1.0, 1, NOW());
-            """)
+        # 유저 999: memories 등록 (RLS scope 하에서)
+        with db.user_scope(db_conn, 999):
+            cur.execute(f"""
+                INSERT INTO memories (
+                    user_id, content, fact_type, target_ingredient_id, 
+                    target_name, season, base_weight, frequency, last_seen
+                )
+                VALUES
+                    (999, '캐시성분 선호', 'prefer_ingredient', {ing_id}, 
+                     NULL, NULL, 1.0, 1, NOW());
+                """)
 
     # 전역 지식 적재 (그래프 투영 및 캐시 Truncate 발생)
     populate_global_knowledge(db_conn)
@@ -310,12 +292,12 @@ def test_traverse_cache_read_through_and_invalidation(db_conn: psycopg.Connectio
     assert paths_2[0].nodes[1].key == "mocked_ingredient"
 
     # 4. memories 수정에 따른 캐시 무효화(Invalidation) 검증 (트리거 동작)
-    with db_conn.cursor() as cur:
+    with db_conn.cursor() as cur, db.user_scope(db_conn, 999):
         cur.execute("""
-            UPDATE memories 
-            SET frequency = 2 
-            WHERE user_id = 999 AND fact_type = 'prefer_ingredient';
-        """)
+                UPDATE memories 
+                SET frequency = 2 
+                WHERE user_id = 999 AND fact_type = 'prefer_ingredient';
+            """)
 
     # 트리거에 의해 캐시 행이 삭제되었는지 검증
     with db_conn.cursor() as cur:

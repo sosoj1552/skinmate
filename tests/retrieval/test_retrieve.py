@@ -1,12 +1,8 @@
-# -*- coding: utf-8 -*-
 """WBS 1A.7 검색 3종 합치기 및 제형 soft-ranking 단위 테스트."""
 
 from __future__ import annotations
 
-import os
-
 import psycopg
-import pytest
 
 from skinmate.contracts.facts import FactType
 from skinmate.documents.embed import embed_text
@@ -15,29 +11,6 @@ from skinmate.memory import bridge, crud
 from skinmate.memory.crud import CrudDecision, CrudOp
 from skinmate.memory.extract import ExtractedFact
 from skinmate.retrieval.retrieve import retrieve_recommendation_context
-
-
-@pytest.fixture(name="db_conn")
-def fixture_db_conn():
-    """테스트용 DB 연결 피스처. superuser 권한(skinmate) 접속 및 테스트 후 자동 롤백."""
-    base_url = os.getenv(
-        "DATABASE_URL",
-        "postgresql://skinmate:skinmate-dev-only@localhost:5432/skinmate",
-    )
-    # superuser 권한으로 연결하기 위해 계정/비밀번호 정보 치환
-    if "@" in base_url:
-        prefix, host_part = base_url.split("@", 1)
-        pg_pass = os.getenv("POSTGRES_PASSWORD", "qwerty12345")
-        db_url = f"postgresql://skinmate:{pg_pass}@{host_part}"
-    else:
-        db_url = base_url
-
-    try:
-        with psycopg.connect(db_url, autocommit=False) as conn:
-            yield conn
-            conn.rollback()
-    except psycopg.OperationalError:
-        pytest.skip("database connection failed, skipping retrieval fusion unit test.")
 
 
 def test_retrieve_recommendation_context_integration(db_conn: psycopg.Connection) -> None:
@@ -151,6 +124,7 @@ def test_retrieve_recommendation_context_integration(db_conn: psycopg.Connection
     # 3. 사용자 memories 데이터 삽입 (1B.5 bridge.project_to_graph 실시간 연동)
     # memories 조작은 RLS scope(user_id=1) 하에서 실행해야 함
     from skinmate import db
+
     with db.user_scope(db_conn, 1):
         # 가을 건조 고민 등록
         fact_concern = ExtractedFact(
