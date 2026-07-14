@@ -31,6 +31,10 @@ jobs:
   db-smoke:
     name: db extensions smoke
     runs-on: ubuntu-latest
+    env:
+      # docker-compose.yml이 POSTGRES_PASSWORD를 필수값으로 강제해서(.env 없는 CI에선
+      # 값이 없으면 interpolation 자체가 실패) CI 전용 값을 여기서 지정한다.
+      POSTGRES_PASSWORD: ci-only-not-a-secret
     steps:
       - uses: actions/checkout@v4
       - name: build & start db
