@@ -46,10 +46,13 @@ def _embed_stub(text: str) -> list[float]:
 def embed_text(text: str) -> list[float]:
     """입력 텍스트를 bge-m3 임베딩 모델(1024차원)로 인코딩합니다.
 
-    환경 변수 SKINMATE_EMBED_STUB=true 일 때 혹은 라이브러리가 없을 때
-    스텁 모드로 폴백 작동하여 CI의 안전과 격리를 보장합니다.
+    기본은 실물 모델이다. 스텁은 SKINMATE_EMBED_STUB=true 를 **명시한 경우에만** 켜진다
+    (테스트·CI 전용). 예전에는 기본값이 스텁이어서, 적재는 실물 벡터인데 서버의 질의만
+    해시 더미 벡터로 인코딩되는 바람에 유사도 검색 전체가 무작위 순위가 되는 결함이 있었다
+    — 같은 이유로 실물 모델 로드 실패 시에도 스텁으로 조용히 폴백하지 않고 예외를 낸다
+    (무작위 검색이 침묵 속에 재발하는 것 방지).
     """
-    stub_mode = os.getenv("SKINMATE_EMBED_STUB", "true").lower() == "true"
+    stub_mode = os.getenv("SKINMATE_EMBED_STUB", "false").lower() == "true"
 
     if stub_mode:
         return _embed_stub(text)
@@ -60,5 +63,5 @@ def embed_text(text: str) -> list[float]:
         embeddings = model.encode([text])
         return [float(x) for x in embeddings[0]]
     except Exception as e:
-        logger.error("failed_to_load_real_embedding_model_falling_back_to_stub", error=str(e))
-        return _embed_stub(text)
+        logger.error("real_embedding_model_unavailable", error=str(e))
+        raise

@@ -1,5 +1,8 @@
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
+import structlog
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -9,10 +12,27 @@ from skinmate import db
 from skinmate.app.turn import process_turn
 from skinmate.chat.orchestrator import TurnResult
 from skinmate.config import settings
+from skinmate.documents.embed import embed_text
 from skinmate.llm.base import LLMProvider
 from skinmate.llm.nvidia import NvidiaProvider
 
-app = FastAPI(title="skinmate")
+logger = structlog.get_logger(__name__)
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """기동 시 임베딩 모델 워밍업 — 첫 사용자 요청이 모델 로딩(~수십 초)을 뒤집어쓰지 않게
+    하고, 스텁 모드로 잘못 떠 있으면(검색이 무작위가 됨) 로그로 즉시 표면화한다."""
+    stub_mode = os.getenv("SKINMATE_EMBED_STUB", "false").lower() == "true"
+    if stub_mode:
+        logger.warning("embedder_running_in_stub_mode_search_quality_degraded")
+    else:
+        embed_text("서버 기동 워밍업")
+        logger.info("embedder_warmed_up", model="bge-m3")
+    yield
+
+
+app = FastAPI(title="skinmate", lifespan=_lifespan)
 
 # static 폴더 경로 설정 및 생성 보장
 current_dir = os.path.dirname(os.path.abspath(__file__))

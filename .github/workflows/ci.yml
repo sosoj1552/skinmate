@@ -9,6 +9,9 @@ jobs:
   lint-test:
     name: lint + unit
     runs-on: ubuntu-latest
+    env:
+      # CI는 실물 임베딩 모델(bge-m3)을 내려받지 않는다 — 스텁 강제(conftest와 이중 방어)
+      SKINMATE_EMBED_STUB: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

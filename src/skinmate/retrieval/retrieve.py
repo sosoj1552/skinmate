@@ -68,10 +68,11 @@ def retrieve_recommendation_context(
 
     # 쿼리 조립 및 기피성분 하드필터링
     sql = """
-        SELECT 
-            p.product_id, 
-            p.name, 
-            p.brand, 
+        SELECT
+            p.product_id,
+            p.name,
+            p.brand,
+            p.category,
             p.description,
             1.0 - (p.embedding <=> %s::vector) AS similarity
         FROM products p
@@ -112,7 +113,14 @@ def retrieve_recommendation_context(
         scored_products.append(
             (
                 similarity,
-                ProductRef(product_id=row["product_id"], name=row["name"], brand=row["brand"]),
+                ProductRef(
+                    product_id=row["product_id"],
+                    name=row["name"],
+                    brand=row["brand"],
+                    category=row["category"],
+                    # 근거 생성 LLM 이 제형·용도를 실데이터로 판단할 수 있는 만큼만 절단 전달
+                    description=(desc[:150] or None),
+                ),
             )
         )
 

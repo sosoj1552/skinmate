@@ -47,8 +47,14 @@ class Rationale(BaseModel):
 
 
 def generate_rationale(provider: LLMProvider, context: RetrievalContext) -> Rationale:
-    """근거 생성. 인용할 경로·기억이 전무하면 LLM 호출 없이 즉시 폴백(PRD F6 예외처리)."""
-    if not context.graph_paths and not context.memory_facts:
+    """근거 생성. 경로·기억·후보 제품이 전부 비었을 때만 LLM 호출 없이 즉시 폴백(PRD F6 예외처리).
+
+    기억·그래프가 없는 신규 사용자(콜드스타트)라도 후보 제품이 검색됐으면 추천을 생성한다 —
+    프롬프트가 "없는 근거 인용 금지"를 강제하므로 개인화 근거 없이도 안전하다. 예전에는
+    graph_paths·memory_facts 가 비면 무조건 폴백해서, 신규 사용자는 아무리 구체적으로
+    요청해도 추천을 받을 수 없었다.
+    """
+    if not context.graph_paths and not context.memory_facts and not context.products:
         logger.info("rationale_no_grounding", query=context.query)
         return Rationale(response=FALLBACK_MESSAGE)
 
@@ -84,7 +90,9 @@ def _format_path(index: int, path: GraphPath) -> str:
 def _format_context(context: RetrievalContext) -> str:
     lines = [f"질문: {context.query}", "", "[후보 제품]"]
     lines += [
-        f"- product_id={p.product_id} {p.name} ({p.brand or '브랜드미상'})"
+        f"- product_id={p.product_id} {p.name} ({p.brand or '브랜드미상'}"
+        f"{f', 카테고리: {p.category}' if p.category else ''})"
+        f"{f' — {p.description}' if p.description else ''}"
         for p in context.products
     ]
     lines += ["", "[그래프 경로]"]

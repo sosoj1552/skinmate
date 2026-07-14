@@ -93,10 +93,26 @@ def test_rationale_drops_unknown_memory_id() -> None:
 
 
 def test_rationale_no_grounding_skips_llm_call() -> None:
-    """graph_paths·memory_facts 둘 다 비면 LLM 을 아예 안 부르고 즉시 폴백."""
+    """graph_paths·memory_facts·products 전부 비면 LLM 을 아예 안 부르고 즉시 폴백."""
     empty_context = RetrievalContext(query="아무거나")
     rationale = generate_rationale(_NeverCallProvider(), empty_context)
     assert rationale.response == FALLBACK_MESSAGE
+
+
+def test_rationale_products_only_still_generates() -> None:
+    """콜드스타트: 기억·그래프 없이 후보 제품만 있어도 추천을 생성한다(신규 사용자 지원)."""
+    from skinmate.contracts.refs import ProductRef
+
+    context = RetrievalContext(
+        query="산뜻한 토너 추천해줘",
+        products=[ProductRef(product_id=35, name="스킨 리커버리 토너", brand="Paula's Choice")],
+    )
+    provider = _CannedProvider({"response": "스킨 리커버리 토너를 추천해요."})
+    rationale = generate_rationale(provider, context)
+    assert provider.calls == 1
+    assert rationale.response == "스킨 리커버리 토너를 추천해요."
+    assert rationale.cited_graph_path_indices == []
+    assert rationale.cited_memory_ids == []
 
 
 def test_rationale_retries_then_recovers() -> None:

@@ -5,6 +5,10 @@ from __future__ import annotations
 import os
 import urllib.parse
 
+# 테스트는 빠르고 결정적인 스텁 임베딩을 쓴다(시드·질의 모두 스텁이라 일관성 유지).
+# 반드시 skinmate 모듈 import 전에 설정 — embed_text 기본값은 실물 모델(bge-m3)이다.
+os.environ.setdefault("SKINMATE_EMBED_STUB", "true")
+
 import psycopg
 import pytest
 from dotenv import load_dotenv

@@ -34,3 +34,9 @@ def next_funnel_question(known_slots: set[str]) -> str | None:
         if slot not in known_slots:
             return _QUESTIONS[slot]
     return None
+
+
+def is_funnel_question(text: str) -> bool:
+    """주어진 봇 메시지가 퍼널 질문인지 판별 — 턴 배선이 '직전 턴이 퍼널이었는지'를
+    history 에서 역산해 같은 턴 자동 재추천 여부를 결정하는 데 쓴다."""
+    return text.strip() in _QUESTIONS.values()

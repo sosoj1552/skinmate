@@ -216,6 +216,55 @@ def test_process_turn_wires_real_retrieval_and_persists_fact(db_conn: psycopg.Co
     assert row is not None and row[0] == "레티놀도 자극나요"
 
 
+def test_funnel_answer_triggers_auto_re_recommendation(db_conn: psycopg.Connection) -> None:
+    """퍼널 질문에 답한 정보 진술은 ACK 로 끝나지 않고, 같은 턴에서 원 요청 기반 추천으로
+    이어진다(E2E 피드백 Case 1). history[-2]=원 요청, history[-1]=퍼널 질문 형태."""
+    _seed_scenario(db_conn)
+
+    history = [
+        "가을이라 건조한데 촉촉한 에멀전 추천해줘",
+        "혹시 피하고 싶거나 선호하는 성분이 있으신가요?",
+    ]
+    provider = _ScriptedProvider(
+        [
+            {"intent": "statement"},  # 1) 라우팅: 정보 진술
+            {"facts": []},  # 2) write_turn 의 fact 추출(no-op)
+            {  # 3) 자동 재추천의 근거 생성
+                "response": "회피 성분을 반영해 수분 에멀전을 추천해요.",
+                "cited_graph_path_indices": [],
+                "cited_memory_ids": [],
+            },
+        ]
+    )
+
+    result = process_turn(
+        db_conn, provider, _UID, "레티놀은 피하고 싶어", history=history, season="가을"
+    )
+
+    assert result.route == Route.SPECIFIC
+    assert result.message == "회피 성분을 반영해 수분 에멀전을 추천해요."
+
+
+def test_statement_without_funnel_history_keeps_ack(db_conn: psycopg.Connection) -> None:
+    """직전 턴이 퍼널 질문이 아니면 정보 진술은 기존대로 ACK 로 끝난다(재추천 미발동)."""
+    _seed_scenario(db_conn)
+
+    history = ["안녕하세요", "안녕하세요! 무엇을 도와드릴까요?"]
+    provider = _ScriptedProvider(
+        [
+            {"intent": "statement"},
+            {"facts": []},
+        ]
+    )
+
+    result = process_turn(
+        db_conn, provider, _UID, "저는 지성 피부예요", history=history, season="가을"
+    )
+
+    assert result.route == Route.STATEMENT
+    assert result.message == "알려주셔서 감사해요, 기억해 둘게요!"
+
+
 def test_process_turn_ac_m4_memory_changes_recommendation(db_conn: psycopg.Connection) -> None:
     """AC-M4: 기억 有/無 사용자의 추천이 실질적으로 다르다(회피성분 반영 여부)."""
     ids = _seed_scenario(db_conn)

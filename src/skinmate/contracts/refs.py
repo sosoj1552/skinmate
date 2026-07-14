@@ -20,8 +20,15 @@ class IngredientRef(BaseModel):
 
 
 class ProductRef(BaseModel):
-    """제품 참조. RetrievalContext 의 후보 제품을 담는 최소 핸들."""
+    """제품 참조. RetrievalContext 의 후보 제품을 담는 최소 핸들.
+
+    category·description 은 근거 생성 LLM 이 제품의 종류·제형을 이름 추측이 아니라
+    실데이터로 판단하게 하기 위한 optional 확장(E2E 피드백 반영) — 기존 생성처는
+    안 채워도 계약 호환.
+    """
 
     product_id: int
     name: str
     brand: str | None = None
+    category: str | None = None
+    description: str | None = None
