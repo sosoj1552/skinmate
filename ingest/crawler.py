@@ -19,7 +19,7 @@ import psycopg
 import structlog
 from bs4 import BeautifulSoup
 
-from ingest.normalize import create_canonical_key
+from ingest.normalize import create_canonical_key, resolve_ingredient_id
 
 logger = structlog.get_logger()
 
@@ -305,46 +305,22 @@ def seed_ingredients_and_products(db_url: str) -> None:
                     )
 
                     for raw_ing in raw_ing_names:
-                        canonical_key = create_canonical_key(None, raw_ing)
-
-                        cur.execute(
-                            "SELECT ingredient_id FROM ingredients " "WHERE canonical_key = %s;",
-                            (canonical_key,),
+                        new_source_meta = {
+                            "url": prod_url,
+                            "kind": "product_ingredient_fallback",
+                            "crawled_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                            "robots_ok": True,
+                        }
+                        ingredient_id, created = resolve_ingredient_id(
+                            cur,
+                            name_ko=raw_ing,
+                            default_source_meta=new_source_meta,
                         )
-                        row = cur.fetchone()
-
-                        if row:
-                            ingredient_id = row[0]
-                        else:
+                        if created:
                             logger.info(
                                 "new_ingredient_found_in_product",
                                 name=raw_ing,
                             )
-                            new_source_meta = {
-                                "url": prod_url,
-                                "kind": "product_ingredient_fallback",
-                                "crawled_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                                "robots_ok": True,
-                            }
-                            cur.execute(
-                                """
-                                INSERT INTO ingredients (
-                                    canonical_key, name_ko, grade,
-                                    intro, source_meta
-                                ) VALUES (%s, %s, %s, %s, %s)
-                                RETURNING ingredient_id;
-                                """,
-                                (
-                                    canonical_key,
-                                    raw_ing,
-                                    "Good",
-                                    "제품 성분표 기반 자동 등록",
-                                    json.dumps(new_source_meta),
-                                ),
-                            )
-                            res_ing_row = cur.fetchone()
-                            assert res_ing_row is not None
-                            ingredient_id = res_ing_row[0]
 
                         cur.execute(
                             """
