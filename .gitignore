@@ -34,6 +34,6 @@ dist/
 .DS_Store
 *.log
 
-# Database data dump (git 제외)
-db/initdb/05-skinmate-data.sql
+# Database data dump (git 제외 — 실사이트 크롤 데이터, 비공개 공유로만 배포)
+db/initdb/06-skinmate-data.sql
 db/skinmate_data_dump.sql

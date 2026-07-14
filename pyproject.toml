@@ -26,6 +26,11 @@ dependencies = [
 embed = [
     "sentence-transformers>=3.0",
 ]
+# 크롤 대상 아티클 페이지가 클라이언트사이드 렌더링(SPA)이라 httpx 만으로는 본문을
+# 못 가져온다 — headless 브라우저 렌더링이 필요한 경우에만 설치하는 별도 extra.
+crawl = [
+    "playwright>=1.40",
+]
 dev = [
     "pytest>=8.1",
     "pytest-cov>=5.0",
