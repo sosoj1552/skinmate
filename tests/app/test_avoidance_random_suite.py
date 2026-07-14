@@ -8,12 +8,10 @@ knowledge/hard_filter.py(1A.5)가 이미 단위 레벨로 검증했지만, retri
 
 from __future__ import annotations
 
-import os
 import random
 from typing import Any
 
 import psycopg
-import pytest
 
 from skinmate.contracts.facts import FactType
 from skinmate.documents.embed import embed_text
@@ -31,20 +29,6 @@ _QUERIES = [
     "주름 개선에 도움되는 제품",
     "민감성 피부에 순한 제품",
 ]
-
-
-@pytest.fixture(name="db_conn")
-def fixture_db_conn():
-    db_url = os.getenv(
-        "DATABASE_URL",
-        "postgresql://skinmate:skinmate-dev-only@localhost:5432/skinmate",
-    )
-    try:
-        with psycopg.connect(db_url, autocommit=False) as conn:
-            yield conn
-            conn.rollback()
-    except psycopg.OperationalError:
-        pytest.skip("database connection failed, skipping avoidance random suite test.")
 
 
 def _seed_pool(conn: psycopg.Connection[Any]) -> dict[str, dict[str, int]]:

@@ -60,8 +60,10 @@ if _original_db_url:
     _parsed = urllib.parse.urlparse(_original_db_url)
     _app_test_url = _parsed._replace(path="/skinmate_test").geturl()
 else:
-    # fallback: DATABASE_URL이 없으면 superuser로라도 연결
-    _app_test_url = _admin_test_url
+    # fallback: DATABASE_URL이 없으면 config.py 기본값과 동일한 skinmate_app 역할로 접속.
+    # superuser(_admin_test_url)로 fallback하면 BYPASSRLS 때문에 RLS 격리 테스트가
+    # 전부 무의미해진다(AC-M5 검증 불가) — 반드시 비-superuser 역할을 써야 한다.
+    _app_test_url = f"postgresql://skinmate_app:skinmate-app-dev-only@{_host}:{_port}/skinmate_test"
 
 os.environ["DATABASE_URL"] = _app_test_url
 

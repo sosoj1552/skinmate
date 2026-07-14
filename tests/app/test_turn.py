@@ -7,11 +7,9 @@ PRD §1 read→respond→write 골격을 실제로 태운다: fixture 대신 ret
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import psycopg
-import pytest
 
 from skinmate.app.turn import process_turn
 from skinmate.chat.route import Route
@@ -39,21 +37,6 @@ class _ScriptedProvider:
         self, system: str, prompt: str, schema: dict[str, object]
     ) -> dict[str, object]:
         return self._payloads.pop(0)
-
-
-@pytest.fixture(name="db_conn")
-def fixture_db_conn():
-    """superuser 접속 + 테스트 후 자동 롤백(test_retrieve.py 와 동일 관례)."""
-    db_url = os.getenv(
-        "DATABASE_URL",
-        "postgresql://skinmate:skinmate-dev-only@localhost:5432/skinmate",
-    )
-    try:
-        with psycopg.connect(db_url, autocommit=False) as conn:
-            yield conn
-            conn.rollback()
-    except psycopg.OperationalError:
-        pytest.skip("database connection failed, skipping app turn integration test.")
 
 
 def _seed_scenario(conn: psycopg.Connection[Any]) -> dict[str, int]:

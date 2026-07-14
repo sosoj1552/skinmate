@@ -9,11 +9,9 @@ choke.age_exec)뿐 아니라 검색 융합 창구(retrieve_recommendation_contex
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import psycopg
-import pytest
 
 from skinmate.contracts.facts import FactType
 from skinmate.contracts.graph import NodeKind
@@ -27,21 +25,6 @@ from skinmate.retrieval.retrieve import retrieve_recommendation_context
 
 _UID_A = 1
 _UID_B = 2
-
-
-@pytest.fixture(name="db_conn")
-def fixture_db_conn():
-    """superuser 접속 + 테스트 후 자동 롤백(tests/app/test_turn.py 와 동일 관례)."""
-    db_url = os.getenv(
-        "DATABASE_URL",
-        "postgresql://skinmate:skinmate-dev-only@localhost:5432/skinmate",
-    )
-    try:
-        with psycopg.connect(db_url, autocommit=False) as conn:
-            yield conn
-            conn.rollback()
-    except psycopg.OperationalError:
-        pytest.skip("database connection failed, skipping isolation integration test.")
 
 
 def _seed_two_users(conn: psycopg.Connection[Any]) -> dict[str, int]:
