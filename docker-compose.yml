@@ -20,21 +20,5 @@ services:
       timeout: 5s
       retries: 12
 
-  graph-seeder:
-    build:
-      context: .
-      dockerfile: Dockerfile.seeder
-    container_name: skinmate-graph-seeder
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-skinmate}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
-      POSTGRES_DB: ${POSTGRES_DB:-skinmate}
-      POSTGRES_PORT: 5432
-      POSTGRES_HOST: db
-    depends_on:
-      db:
-        condition: service_healthy
-    restart: on-failure
-
 volumes:
   db_data:

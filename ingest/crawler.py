@@ -1,6 +1,6 @@
 """폴라초이스 공식 몰 크롤러 및 적재 엔진 (WBS 1A.1).
 
-성분사전, 제품 전성분, RAG용 아티클 문서를 안전하고 정중하게 수집하여
+성분사전, 제품 전성분을 안전하고 정중하게 수집하여
 DB(관계형 테이블 및 매핑 junction)에 멱등하게 적재합니다.
 """
 
@@ -18,6 +18,8 @@ import httpx
 import psycopg
 import structlog
 from bs4 import BeautifulSoup
+from dotenv import load_dotenv
+from playwright.sync_api import sync_playwright
 
 from ingest.normalize import create_canonical_key, resolve_ingredient_id
 
@@ -64,32 +66,80 @@ def seed_ingredients_and_products(db_url: str) -> None:
     """폴라초이스 사이트맵 및 성분사전에서 데이터를 수집해 적재합니다."""
     logger.info("crawl_and_seed_process_started", db_url=db_url)
 
-    sitemap_url = "https://www.paulaschoice.co.kr/sitemap_0.xml"
-    with httpx.Client(headers=HEADERS, follow_redirects=True, timeout=30.0) as client:
-        try:
-            resp = client.get(sitemap_url)
-            resp.raise_for_status()
-            locs = re.findall(r"<loc>([^<]+)</loc>", resp.text)
-            logger.info("sitemap_urls_fetched", count=len(locs))
-        except Exception as e:
-            logger.error("sitemap_fetch_failed", error=str(e))
-            raise e
-
+    # ── [A-1] 전제품 목록 페이지에서 Playwright 무한 스크롤로 제품 URL 추출 ──
+    logger.info("fetching_product_urls_via_infinite_scroll")
+    list_url = "https://www.paulaschoice.co.kr/skin-care-products"
     product_urls = []
-    article_urls = []
-    for loc_url in locs:
-        if "/expert-advice/" in loc_url or "/skincare-advice/" in loc_url:
-            article_urls.append(loc_url)
-        elif "/paulas-choice-skincare/" in loc_url or (
-            loc_url.endswith(".html") and "/ingredients/" not in loc_url
-        ):
-            product_urls.append(loc_url)
 
-    logger.info(
-        "url_categorization",
-        products=len(product_urls),
-        articles=len(article_urls),
-    )
+    with sync_playwright() as p:
+        logger.info("launching_headless_browser_for_product_urls")
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.set_viewport_size({"width": 1920, "height": 1080})
+
+        try:
+            page.goto(list_url, wait_until="domcontentloaded", timeout=45000)
+            page.wait_for_timeout(3000)  # 팝업 로딩 대기
+
+            # 팝업 닫기 시도
+            close_btn_selectors = [
+                "//*[text()='닫기']",
+                "//*[text()='하루 동안 열지 않기']",
+                "//*[contains(@class, 'CloseModalButton')]",
+                "//*[contains(@class, 'close')]",
+            ]
+            for sel in close_btn_selectors:
+                try:
+                    btn = page.locator(f"xpath={sel}").first
+                    if btn.is_visible():
+                        btn.click()
+                        logger.info("popup_closed_on_product_list_page")
+                        page.wait_for_timeout(2000)
+                        break
+                except Exception:
+                    pass
+
+            sentinel_selector = '[class*="InfiniteScroll__Sentinel"]'
+            page.wait_for_selector(sentinel_selector, timeout=10000)
+
+            previous_count = 0
+            tiles = page.locator('[class*="ProductList__Tile"]').all()
+            current_count = len(tiles)
+
+            scroll_count = 0
+            while current_count > previous_count and scroll_count < 10:
+                previous_count = current_count
+                scroll_count += 1
+                try:
+                    sentinel = page.locator(sentinel_selector).first
+                    sentinel.scroll_into_view_if_needed()
+                    page.wait_for_timeout(2500)
+
+                    tiles = page.locator('[class*="ProductList__Tile"]').all()
+                    current_count = len(tiles)
+                except Exception as e:
+                    logger.warn("scrolling_sentinel_failed", error=str(e))
+                    break
+
+            # 모든 타일에서 href 추출
+            for tile in tiles:
+                link = tile.locator("a").first
+                href = link.get_attribute("href") if link else None
+                if href:
+                    if href.startswith("/"):
+                        full_url = f"https://www.paulaschoice.co.kr{href}"
+                    else:
+                        full_url = href
+                    product_urls.append(full_url)
+
+            # 중복 제거
+            product_urls = list(set(product_urls))
+            logger.info("product_urls_collected", count=len(product_urls))
+        except Exception as e:
+            logger.error("product_list_extraction_failed", error=str(e))
+            raise e
+        finally:
+            browser.close()
 
     with psycopg.connect(db_url) as conn:
         with conn.cursor() as cur:
@@ -235,9 +285,31 @@ def seed_ingredients_and_products(db_url: str) -> None:
                     continue
 
                 category = product_data.get("categoryId") or "Skincare"
-                short_desc = product_data.get("shortDescription") or ""
-                long_desc = product_data.get("longDescription") or ""
-                full_desc = f"{short_desc}\n{long_desc}".strip()
+
+                def clean_html(text: str) -> str:
+                    if not text:
+                        return ""
+                    txt = BeautifulSoup(text, "html.parser").get_text(separator=" ")
+                    txt = re.sub(r"\s+", " ", txt)
+                    return txt.strip()
+
+                short_desc = clean_html(product_data.get("shortDescription") or "")
+                long_desc = clean_html(product_data.get("longDescription") or "")
+
+                skin_types = product_data.get("skinTypes") or ""
+                concerns = product_data.get("concerns") or ""
+
+                desc_parts = []
+                if short_desc:
+                    desc_parts.append(short_desc)
+                if long_desc:
+                    desc_parts.append(long_desc)
+                if skin_types:
+                    desc_parts.append(f"피부 타입: {skin_types}")
+                if concerns:
+                    desc_parts.append(f"피부 고민: {concerns}")
+
+                full_desc = "\n".join(desc_parts).strip()
 
                 source_meta = {
                     "url": prod_url,
@@ -331,82 +403,19 @@ def seed_ingredients_and_products(db_url: str) -> None:
                             """,
                             (product_id, ingredient_id),
                         )
-
-            # ── [C] RAG용 아티클 수집 ──
-            logger.info("fetching_articles_for_rag")
-            unique_article_urls = list(set(article_urls))
-            logger.info("target_articles_identified", count=len(unique_article_urls))
-
-            for art_url in unique_article_urls:
-                logger.info("fetching_article_detail", url=art_url)
-                delay_request()
-
-                try:
-                    with httpx.Client(
-                        headers=HEADERS, follow_redirects=True, timeout=20.0
-                    ) as client:
-                        resp = client.get(art_url)
-                        resp.raise_for_status()
-                except Exception as e:
-                    logger.error(
-                        "article_detail_fetch_failed",
-                        url=art_url,
-                        error=str(e),
-                    )
-                    continue
-
-                app_data = parse_app_data(resp.text)
-                page_data = app_data.get("page", {})
-                content_data = page_data.get("content", {})
-
-                article_body = ""
-                if content_data:
-                    text1 = content_data.get("text1") or ""
-                    text2 = content_data.get("text2") or ""
-                    html1 = content_data.get("html1") or ""
-
-                    soup_html = BeautifulSoup(html1, "html.parser")
-                    text_html = soup_html.get_text()
-
-                    article_body = f"{text1}\n{text2}\n{text_html}".strip()
-
-                if not article_body:
-                    soup_art = BeautifulSoup(resp.text, "html.parser")
-                    paragraphs = [p.get_text().strip() for p in soup_art.find_all("p")]
-                    article_body = "\n".join([p for p in paragraphs if len(p) > 20])
-
-                if not article_body.strip():
-                    logger.warn("empty_article_body", url=art_url)
-                    continue
-
-                source_meta = {
-                    "url": art_url,
-                    "kind": "beautypedia_prose",
-                    "crawled_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                    "robots_ok": True,
-                }
-
-                cur.execute(
-                    """
-                    INSERT INTO documents (
-                        content, embedding, embedding_model_id, source_meta
-                    ) VALUES (%s, %s, %s, %s);
-                    """,
-                    (
-                        article_body,
-                        dummy_vector,
-                        "bge-m3",
-                        json.dumps(source_meta),
-                    ),
-                )
-
         conn.commit()
     logger.info("crawl_and_seed_process_finished")
 
 
 if __name__ == "__main__":
-    db_url = os.getenv(
-        "DATABASE_URL",
-        "postgresql://skinmate:skinmate-dev-only@localhost:5432/skinmate",
-    )
+    load_dotenv()
+
+    user = os.getenv("POSTGRES_USER", "skinmate")
+    password = os.getenv("POSTGRES_PASSWORD", "")
+    host = os.getenv("POSTGRES_HOST", "localhost")
+    port = os.getenv("POSTGRES_PORT", "5432")
+    dbname = os.getenv("POSTGRES_DB", "skinmate")
+
+    db_url = f"postgresql://{user}:{password}@{host}:{port}/{dbname}"
+
     seed_ingredients_and_products(db_url)
