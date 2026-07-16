@@ -11,6 +11,7 @@ import time
 
 import psycopg
 import structlog
+from dotenv import load_dotenv
 
 # 실물 임베딩 모델 작동 강제 활성화 (스텁 모드 비활성화)
 os.environ["SKINMATE_EMBED_STUB"] = "false"
@@ -29,15 +30,15 @@ def populate_embeddings(db_url: str) -> None:
     with psycopg.connect(db_url) as conn:
         with conn.cursor() as cur:
             # ── 1. products 임베딩 갱신 ──
-            cur.execute("SELECT product_id, description FROM products;")
+            cur.execute("SELECT product_id, name, description FROM products;")
             products = cur.fetchall()
             logger.info("products_fetched_for_embedding", count=len(products))
 
-            for prod_id, desc in products:
-                text_to_embed = desc or ""
-                # 빈 텍스트 예외 처리
-                if not text_to_embed.strip():
-                    text_to_embed = "빈 제품 설명"
+            for prod_id, name, desc in products:
+                desc_text = desc or ""
+                if not desc_text.strip():
+                    desc_text = "제품 설명 없음"
+                text_to_embed = f"제품명: {name}\n설명: {desc_text}"
 
                 logger.info("generating_product_embedding", product_id=prod_id)
                 vector = embed_text(text_to_embed)
@@ -80,8 +81,14 @@ def populate_embeddings(db_url: str) -> None:
 
 
 if __name__ == "__main__":
-    db_url = os.getenv(
-        "DATABASE_URL",
-        "postgresql://skinmate:skinmate-dev-only@localhost:5432/skinmate",
-    )
+    load_dotenv()
+
+    user = os.getenv("POSTGRES_USER", "skinmate")
+    password = os.getenv("POSTGRES_PASSWORD", "")
+    host = os.getenv("POSTGRES_HOST", "localhost")
+    port = os.getenv("POSTGRES_PORT", "5432")
+    dbname = os.getenv("POSTGRES_DB", "skinmate")
+
+    db_url = f"postgresql://{user}:{password}@{host}:{port}/{dbname}"
+
     populate_embeddings(db_url)
