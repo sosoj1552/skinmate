@@ -89,12 +89,16 @@ def _format_path(index: int, path: GraphPath) -> str:
 
 def _format_context(context: RetrievalContext) -> str:
     lines = [f"질문: {context.query}", "", "[후보 제품]"]
-    lines += [
-        f"- product_id={p.product_id} {p.name} ({p.brand or '브랜드미상'}"
-        f"{f', 카테고리: {p.category}' if p.category else ''})"
-        f"{f' — {p.description}' if p.description else ''}"
-        for p in context.products
-    ]
+    for p in context.products:
+        line = (
+            f"- product_id={p.product_id} {p.name} ({p.brand or '브랜드미상'}"
+            f"{f', 카테고리: {p.category}' if p.category else ''})"
+        )
+        if p.description:
+            line += f" — {p.description}"
+        if p.ingredients:
+            line += f" [성분: {', '.join(p.ingredients)}]"
+        lines.append(line)
     lines += ["", "[그래프 경로]"]
     lines += [_format_path(i, path) for i, path in enumerate(context.graph_paths)]
     lines += ["", "[회상된 개인 기억]"]
