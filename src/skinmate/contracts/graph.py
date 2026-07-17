@@ -20,19 +20,22 @@ class NodeKind(StrEnum):
     PRODUCT = "Product"
     CONCERN = "Concern"
     BRAND = "Brand"
+    MECHANISM = "Mechanism"  # 성분 작동원리(GraphRAG 개념 기반 메타패스 W1)
 
 
 class EdgeRel(StrEnum):
     """그래프 엣지 관계(DATA-MODEL §2). 전역(지식·containment) + 개인(memories 투영)."""
 
     CONTAINS = "CONTAINS"  # (:Product)->(:Ingredient), product_ingredients 투영
-    TREATS = "TREATS"  # (:Ingredient)->(:Concern), 그래프 네이티브
+    TREATS = "TREATS"  # (:Ingredient|:Mechanism)->(:Concern), 그래프 네이티브
     AGGRAVATES = "AGGRAVATES"  # (:Ingredient)->(:Concern), 그래프 네이티브
     HELPS = "HELPS"  # (:Ingredient)->(:Ingredient), 그래프 네이티브
     CONFLICTS = "CONFLICTS"  # (:Ingredient)->(:Ingredient), 그래프 네이티브
     AVOIDS = "AVOIDS"  # (:User)->(:Ingredient|Brand), 개인 엣지
     PREFERS = "PREFERS"  # (:User)->(:Ingredient|Brand), 개인 엣지
     HAS_CONCERN = "HAS_CONCERN"  # (:User)->(:Concern) {season?}, 개인 엣지
+    ACHIEVES = "ACHIEVES"  # (:Ingredient)->(:Mechanism), GraphRAG W1 메타패스
+    ENABLES = "ENABLES"  # (:Mechanism)->(:Mechanism), 작동원리 연쇄(GraphRAG)
 
 
 class GraphNode(BaseModel):
@@ -50,6 +53,7 @@ class GraphEdge(BaseModel):
     from_idx: int
     to_idx: int
     season: str | None = None  # HAS_CONCERN 의 계절 프로퍼티
+    source_doc_ids: list[int] = []  # 근거 문서 provenance(GraphRAG ACHIEVES/TREATS)
 
 
 class GraphPath(BaseModel):

@@ -16,13 +16,63 @@ from skinmate.chat.orchestrator import ACK_MESSAGE
 from skinmate.chat.route import Route
 from skinmate.contracts.facts import FactType
 from skinmate.documents.embed import embed_text
+from skinmate.graph import choke
 from skinmate.graph.knowledge_populate import populate_global_knowledge
-from skinmate.memory import bridge, crud
+from skinmate.memory import crud
 from skinmate.memory.crud import CrudDecision, CrudOp
 from skinmate.memory.extract import ExtractedFact
 from skinmate.retrieval.retrieve import retrieve_recommendation_context
 
 _UID = 1
+
+
+def _seed_w1_dryness(conn: psycopg.Connection, hyaluronic_id: int) -> None:
+    """히알루론산 -[ACHIEVES]-> 보습 -[TREATS]-> dryness (GraphRAG W1) 를 적재한다.
+
+    scripts/graphrag_slice.py 패턴: 노드는 각각 MERGE로 먼저 바인딩하고, 관계 속성은
+    별도 MATCH+SET 으로 나눈다(MERGE 직후 SET 은 AGE 에서 영속화되지 않는 결함 회피).
+    """
+    choke.age_exec(
+        conn,
+        None,
+        "MERGE (i:Ingredient {ingredient_id: $id}) SET i.name_ko = $name",
+        {"id": hyaluronic_id, "name": "테스트히알루론산"},
+    )
+    choke.age_exec(conn, None, "MERGE (m:Mechanism {name: $name})", {"name": "보습"})
+    choke.age_exec(
+        conn,
+        None,
+        "MERGE (c:Concern {name: $name}) SET c.label = $label",
+        {"name": "dryness", "label": "건조"},
+    )
+    choke.age_exec(
+        conn,
+        None,
+        "MERGE (i:Ingredient {ingredient_id: $id}) MERGE (m:Mechanism {name: $mech}) "
+        "MERGE (i)-[:ACHIEVES]->(m)",
+        {"id": hyaluronic_id, "mech": "보습"},
+    )
+    choke.age_exec(
+        conn,
+        None,
+        "MATCH (i:Ingredient {ingredient_id: $id})-[r:ACHIEVES]->(m:Mechanism {name: $mech}) "
+        "SET r.source_doc_ids = $docs, r.origin = 'manual', r.confidence = 1.0",
+        {"id": hyaluronic_id, "mech": "보습", "docs": [8001]},
+    )
+    choke.age_exec(
+        conn,
+        None,
+        "MERGE (m:Mechanism {name: $mech}) MERGE (c:Concern {name: $concern}) "
+        "MERGE (m)-[:TREATS]->(c)",
+        {"mech": "보습", "concern": "dryness"},
+    )
+    choke.age_exec(
+        conn,
+        None,
+        "MATCH (m:Mechanism {name: $mech})-[r:TREATS]->(c:Concern {name: $concern}) "
+        "SET r.source_doc_ids = $docs, r.origin = 'manual', r.confidence = 1.0",
+        {"mech": "보습", "concern": "dryness", "docs": [8002]},
+    )
 
 
 class _ScriptedProvider:
@@ -50,9 +100,10 @@ def _seed_scenario(conn: psycopg.Connection[Any]) -> dict[str, int]:
             g name := 'skinmate';
             gid oid;
             lbl text;
-            vlabels text[] := ARRAY['User','Ingredient','Product','Concern','Brand'];
+            vlabels text[] := ARRAY['User','Ingredient','Product','Concern','Brand','Mechanism'];
             elabels text[] := ARRAY['CONTAINS','TREATS','AGGRAVATES','HELPS',
-                                     'CONFLICTS','HAS_CONCERN','AVOIDS','PREFERS'];
+                                     'CONFLICTS','HAS_CONCERN','AVOIDS','PREFERS',
+                                     'ACHIEVES','ENABLES'];
         BEGIN
             IF NOT EXISTS (SELECT 1 FROM ag_catalog.ag_graph WHERE name = g) THEN
                 PERFORM ag_catalog.create_graph(g);
@@ -109,23 +160,34 @@ def _seed_scenario(conn: psycopg.Connection[Any]) -> dict[str, int]:
         oil_id = prod_map["테스트 페이스 오일"]
         irritant_cream_id = prod_map["테스트 자극 크림"]
 
+        # 자극 크림은 히알루론산(그래프 추천성분)도 함께 넣어, AC-M4(기억 유무 차이)가
+        # 그래프 성분필터가 아니라 회피성분 하드필터(개인 기억)만으로 갈리도록 격리한다.
         cur.execute(f"""
             INSERT INTO product_ingredients (product_id, ingredient_id) VALUES
             ({emulsion_id}, {hyaluronic_id}),
             ({oil_id}, {hyaluronic_id}),
-            ({irritant_cream_id}, {ethanol_id});
+            ({irritant_cream_id}, {ethanol_id}),
+            ({irritant_cream_id}, {hyaluronic_id});
             """)
 
-    # 전역 지식 그래프 투영(멱등)
+    # 전역 지식 그래프 투영(멱등, 옛 canonical_key 기반 CONTAINS/TREATS — 현재 검색 흐름은
+    # 더 이상 이에 의존하지 않지만 비파괴적으로 유지)
     populate_global_knowledge(conn)
 
+    # GraphRAG 개념 기반 메타패스(W1): 히알루론산→보습→dryness. 질의 자체에 "건조" 키워드가
+    # 있어 고민 인식은 질의에서 바로 되지만, 추천 성분(히알루론산) 은 이 W1 경로가 없으면
+    # 그래프에서 나오지 않는다.
+    _seed_w1_dryness(conn, hyaluronic_id)
+
     # 기존 기억: 가을철 건조 고민 + 오일 텍스처 회피 + 에탄올(자극) 성분 회피
+    # (HAS_CONCERN/AVOID_INGREDIENT 그래프 투영(bridge.project_to_graph)은 옛 User-rooted
+    # 순회 전용이었다 — 현재 검색 흐름은 하드필터(관계형 target_ingredient_id)·질의 기반 고민
+    # 인식만 쓰므로 더 이상 호출하지 않는다.)
     concern = ExtractedFact(
         fact_type=FactType.HAS_CONCERN, content="가을철 건조", target_name="건조", season="가을"
     )
     d_concern = CrudDecision(op=CrudOp.ADD, fact=concern)
     crud.apply_decision(conn, _UID, d_concern)
-    bridge.project_to_graph(conn, _UID, d_concern, concern_key="dryness")
 
     oil_texture = ExtractedFact(fact_type=FactType.OTHER, content="오일 제형은 안 맞아서 회피함")
     d_oil = CrudDecision(op=CrudOp.ADD, fact=oil_texture)
@@ -136,7 +198,6 @@ def _seed_scenario(conn: psycopg.Connection[Any]) -> dict[str, int]:
     )
     d_avoid = CrudDecision(op=CrudOp.ADD, fact=avoid_ethanol)
     crud.apply_decision(conn, _UID, d_avoid, target_ingredient_id=ethanol_id)
-    bridge.project_to_graph(conn, _UID, d_avoid, ingredient_key="test_ethanol")
 
     return {
         "emulsion_id": emulsion_id,
@@ -157,11 +218,9 @@ def test_representative_scenario_four_assertions(db_conn: psycopg.Connection) ->
         db_conn, user_id=_UID, query=_UTTERANCE, season="가을", limit=50
     )
 
-    # (a) 고민→성분 경로(계절 반영) 포함
+    # (a) 고민→성분 경로 포함 (GraphRAG W1: 고민←작동원리←성분)
     concern_paths = [p for p in context.graph_paths if any(n.key == "dryness" for n in p.nodes)]
     assert concern_paths, "건조 고민 경로가 근거에 없음"
-    seasoned = [e for p in concern_paths for e in p.edges if e.season == "가을"]
-    assert seasoned, "계절(가을) 정보가 경로 엣지에 반영되지 않음"
 
     # (b) 회피 성분(에탄올) 포함 제품 0건
     product_ids = {p.product_id for p in context.products}
