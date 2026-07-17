@@ -4,10 +4,12 @@
 --
 -- [설계 결정]
 --  * 그래프 이름 = 'skinmate' (단일 그래프).
---  * 노드: User, Ingredient, Product, Concern, Brand. **Formulation·Season 노드 없음**
---    (제형=임베딩 전용, 계절=memories.season 개인 맥락).
+--  * 노드: User, Ingredient, Product, Concern, Brand, Mechanism. **Formulation·Season 노드
+--    없음**(제형=임베딩 전용, 계절=memories.season 개인 맥락). Mechanism 은 GraphRAG 개념
+--    기반 메타패스(W1: 성분→작동원리→고민)용 성분 작동원리 노드(graph/traverse.py).
 --  * 전역 엣지: CONTAINS(product_ingredients 투영) + TREATS/AGGRAVATES·HELPS/CONFLICTS
 --    (**그래프 네이티브** — 테이블 없이 인제스트가 문서·크롤에서 추출해 직접 적재).
+--    ACHIEVES(성분→작동원리)·ENABLES(작동원리→작동원리 연쇄)도 그래프 네이티브(GraphRAG).
 --  * 개인 엣지: HAS_CONCERN/AVOIDS/PREFERS (memories 투영). Concern/Brand 노드는 name 키.
 --  * 개인 엣지는 user_scope 프로퍼티로 스탬프 → choke(age_exec)가 스코프 강제(RLS 대체, R4).
 
@@ -20,9 +22,10 @@ DECLARE
     g        name := 'skinmate';
     gid      oid;
     lbl      text;
-    vlabels  text[] := ARRAY['User','Ingredient','Product','Concern','Brand'];
+    vlabels  text[] := ARRAY['User','Ingredient','Product','Concern','Brand','Mechanism'];
     elabels  text[] := ARRAY['CONTAINS','TREATS','AGGRAVATES','HELPS',
-                             'CONFLICTS','HAS_CONCERN','AVOIDS','PREFERS'];
+                             'CONFLICTS','HAS_CONCERN','AVOIDS','PREFERS',
+                             'ACHIEVES','ENABLES'];
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM ag_catalog.ag_graph WHERE name = g) THEN
         PERFORM ag_catalog.create_graph(g);

@@ -15,12 +15,58 @@ from psycopg.rows import dict_row
 
 from skinmate.config import settings
 from skinmate.contracts.facts import FactType
+from skinmate.contracts.graph import GraphPath, NodeKind
 from skinmate.contracts.refs import ProductRef
 from skinmate.contracts.retrieval import DocHit, RetrievalContext
 from skinmate.documents.embed import embed_text
 from skinmate.documents.search import search_documents
 from skinmate.graph.traverse import traverse_recommendation_paths
 from skinmate.memory.rank import rank_memory
+
+
+def _recommended_ingredient_ids(graph_paths: list[GraphPath]) -> list[int]:
+    """W1/W2 그래프 경로에서 추천 성분(Ingredient 노드, key=ingredient_id)을 모은다."""
+    ids: set[int] = set()
+    for path in graph_paths:
+        for node in path.nodes:
+            if node.kind != NodeKind.INGREDIENT:
+                continue
+            try:
+                ids.add(int(node.key))
+            except ValueError:
+                continue
+    return sorted(ids)
+
+
+def _graph_source_doc_ids(graph_paths: list[GraphPath]) -> list[int]:
+    """그래프 경로 엣지의 source_doc_ids(근거 문서 provenance)를 모은다."""
+    ids: set[int] = set()
+    for path in graph_paths:
+        for edge in path.edges:
+            ids.update(edge.source_doc_ids)
+    return sorted(ids)
+
+
+def _fetch_graph_evidence_docs(conn: psycopg.Connection[Any], doc_ids: list[int]) -> list[DocHit]:
+    """그래프 경로가 인용한 근거 문서를 회수해 DocHit으로 만든다(그래프 근거 우선)."""
+    if not doc_ids:
+        return []
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            "SELECT doc_id, left(content, 300) AS excerpt, source_meta "
+            "FROM documents WHERE doc_id = ANY(%s);",
+            (doc_ids,),
+        )
+        rows = cur.fetchall()
+    return [
+        DocHit(
+            doc_id=r["doc_id"],
+            content=r["excerpt"],
+            score=1.0,
+            source_meta=r["source_meta"] if isinstance(r["source_meta"], dict) else {},
+        )
+        for r in rows
+    ]
 
 
 def retrieve_recommendation_context(
@@ -63,10 +109,15 @@ def retrieve_recommendation_context(
         if fact.fact_type == FactType.AVOID_INGREDIENT and fact.target_ingredient_id is not None
     ]
 
+    # 1.5 그래프 개념 기반 메타패스(W1/W2) 순회 — 질의에서 인식한 고민에 대한 추천 성분 +
+    # 근거 문서(source_doc_ids)를 먼저 수집한다. 하드필터·doc_hits 조립에 모두 쓰인다.
+    graph_paths = traverse_recommendation_paths(conn, user_id, query, season=season)
+    recommended_ingredient_ids = _recommended_ingredient_ids(graph_paths)
+
     # 2. pgvector 기반 제품 코사인 유사도 검색 수행
     query_vector = embed_text(query)
 
-    # 쿼리 조립 및 기피성분 하드필터링
+    # 쿼리 조립 및 기피성분 하드필터링 + 그래프 추천성분 필터링
     sql = """
         SELECT
             p.product_id,
@@ -83,12 +134,24 @@ def retrieve_recommendation_context(
     if avoid_ingredient_ids:
         sql += """
             AND p.product_id NOT IN (
-                SELECT DISTINCT pi.product_id 
+                SELECT DISTINCT pi.product_id
                 FROM product_ingredients pi
                 WHERE pi.ingredient_id = ANY(%s)
             )
         """
         params.append(avoid_ingredient_ids)
+
+    # SPECIFIC 고민 질의는 그래프 우선: 추천 성분이 있으면 그 성분을 함유한 제품으로 좁힌다.
+    # 그래프 경로가 없으면(고민 미인식 등) 기존 pgvector 전체 검색으로 폴백한다.
+    if recommended_ingredient_ids:
+        sql += """
+            AND p.product_id IN (
+                SELECT DISTINCT pi.product_id
+                FROM product_ingredients pi
+                WHERE pi.ingredient_id = ANY(%s)
+            )
+        """
+        params.append(recommended_ingredient_ids)
 
     # 모든 제품 후보 수집
     with conn.cursor(row_factory=dict_row) as cur:
@@ -128,9 +191,14 @@ def retrieve_recommendation_context(
     scored_products.sort(key=lambda x: -x[0])
     final_products = [item[1] for item in scored_products[:limit]]
 
-    # 4. RAG 문서 유사도 검색 실행
+    # 4. RAG 문서 유사도 검색 + 그래프 근거 문서(graph_paths의 source_doc_ids) 병합
+    # 그래프 근거를 우선하고, 벡터 검색 결과 중 중복 doc_id 는 제외한다.
+    graph_doc_ids = _graph_source_doc_ids(graph_paths)
+    graph_doc_hits = _fetch_graph_evidence_docs(conn, graph_doc_ids)
+    graph_doc_id_set = {d.doc_id for d in graph_doc_hits}
+
     doc_results = search_documents(settings.database_url, query, limit=limit)
-    doc_hits = [
+    vector_doc_hits = [
         DocHit(
             doc_id=d["doc_id"],
             content=d["content"],
@@ -138,10 +206,11 @@ def retrieve_recommendation_context(
             source_meta=d["source_meta"] if isinstance(d["source_meta"], dict) else {},
         )
         for d in doc_results
+        if d["doc_id"] not in graph_doc_id_set
     ]
+    doc_hits = graph_doc_hits + vector_doc_hits
 
-    # 5. 그래프 2-hop 추론 경로 순회
-    graph_paths = traverse_recommendation_paths(conn, user_id, season=season)
+    # 5. (그래프 순회는 위 1.5 단계에서 이미 완료)
 
     # 6. RetrievalContext 패키징 방출
     return RetrievalContext(

@@ -1,347 +1,246 @@
-"""WBS 1A.6 2+hop 그래프 순회 및 근거 문장 생성 단위 테스트."""
+"""GraphRAG 개념 기반 메타패스(W1/W2) 순회 및 근거 문장 생성 단위 테스트.
+
+scripts/graphrag_slice.py 로 검증된 W1(성분→작동원리→고민)·W2(성분→고민 직접) 순회를
+프로덕션(graph/traverse.py)으로 승격한 코드를 검증한다. 그래프는 ingredient_id 키의
+Ingredient 노드·Mechanism 노드·ACHIEVES/TREATS(+source_doc_ids) 표현을 쓴다(옛
+canonical_key 기반 AVOIDS/PREFERS/대안경로 표현은 더 이상 이 함수가 방출하지 않는다).
+"""
 
 from __future__ import annotations
 
 import psycopg
 
 from skinmate import db
+from skinmate.contracts.facts import FactType
 from skinmate.contracts.graph import EdgeRel, NodeKind
-from skinmate.graph.knowledge_populate import populate_global_knowledge
+from skinmate.graph import choke
 from skinmate.graph.traverse import (
     generate_rationale_from_path,
+    recognize_concern,
     traverse_recommendation_paths,
 )
+from skinmate.memory import crud
+from skinmate.memory.crud import CrudDecision, CrudOp
+from skinmate.memory.extract import ExtractedFact
 
 
-def test_traverse_recommendation_paths_integration(db_conn: psycopg.Connection) -> None:
-    """사용자 memories와 RDB 지식을 바탕으로 2+hop 그래프 순회 및 격리(leakage)를 검증합니다."""
-    with db_conn.cursor() as cur:
-        # 1. 멱등적 그래프 및 라벨 생성 (비파괴적 셋업)
-        cur.execute("SET LOCAL search_path = ag_catalog, public;")
-        cur.execute("""
-        DO $$
-        DECLARE
-            g name := 'skinmate';
-            gid oid;
-            lbl text;
-            vlabels text[] := ARRAY['User','Ingredient','Product','Concern','Brand'];
-            elabels text[] := ARRAY['CONTAINS','TREATS','AGGRAVATES','HELPS',
-                                     'CONFLICTS','HAS_CONCERN','AVOIDS','PREFERS'];
-        BEGIN
-            IF NOT EXISTS (SELECT 1 FROM ag_catalog.ag_graph WHERE name = g) THEN
-                PERFORM ag_catalog.create_graph(g);
+def _ensure_graph_labels(cur: psycopg.Cursor) -> None:
+    """User/Ingredient/Product/Concern/Brand/Mechanism vlabel + ACHIEVES/ENABLES 포함
+    관계 elabel을 멱등 보장한다."""
+    cur.execute("SET LOCAL search_path = ag_catalog, public;")
+    cur.execute("""
+    DO $$
+    DECLARE
+        g name := 'skinmate';
+        gid oid;
+        lbl text;
+        vlabels text[] := ARRAY['User','Ingredient','Product','Concern','Brand','Mechanism'];
+        elabels text[] := ARRAY['CONTAINS','TREATS','AGGRAVATES','HELPS',
+                                 'CONFLICTS','HAS_CONCERN','AVOIDS','PREFERS',
+                                 'ACHIEVES','ENABLES'];
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM ag_catalog.ag_graph WHERE name = g) THEN
+            PERFORM ag_catalog.create_graph(g);
+        END IF;
+        SELECT graphid INTO gid FROM ag_catalog.ag_graph WHERE name = g;
+        FOREACH lbl IN ARRAY vlabels LOOP
+            IF NOT EXISTS (
+                SELECT 1 FROM ag_catalog.ag_label
+                WHERE name = lbl AND graph = gid
+            ) THEN
+                PERFORM ag_catalog.create_vlabel(g, lbl);
             END IF;
-            SELECT graphid INTO gid FROM ag_catalog.ag_graph WHERE name = g;
-            FOREACH lbl IN ARRAY vlabels LOOP
-                IF NOT EXISTS (
-                    SELECT 1 FROM ag_catalog.ag_label 
-                    WHERE name = lbl AND graph = gid
-                ) THEN
-                    PERFORM ag_catalog.create_vlabel(g, lbl);
-                END IF;
-            END LOOP;
-            FOREACH lbl IN ARRAY elabels LOOP
-                IF NOT EXISTS (
-                    SELECT 1 FROM ag_catalog.ag_label 
-                    WHERE name = lbl AND graph = gid
-                ) THEN
-                    PERFORM ag_catalog.create_elabel(g, lbl);
-                END IF;
-            END LOOP;
-        END $$;
-        """)
+        END LOOP;
+        FOREACH lbl IN ARRAY elabels LOOP
+            IF NOT EXISTS (
+                SELECT 1 FROM ag_catalog.ag_label
+                WHERE name = lbl AND graph = gid
+            ) THEN
+                PERFORM ag_catalog.create_elabel(g, lbl);
+            END IF;
+        END LOOP;
+    END $$;
+    """)
 
-        # 2. 테스트용 RDB 데이터 삽입
+
+def _seed_ingredients(cur: psycopg.Cursor) -> dict[str, int]:
+    cur.execute("""
+        INSERT INTO ingredients (canonical_key, name_ko, intro)
+        VALUES
+        ('test_gr_hyaluronic', '테스트히알루론산', 'W1 검증용 보습 성분.'),
+        ('test_gr_niacinamide', '테스트나이아신아마이드', 'W2 검증용 직접 완화 성분.')
+        ON CONFLICT (canonical_key) DO UPDATE
+        SET name_ko = EXCLUDED.name_ko, intro = EXCLUDED.intro
+        RETURNING canonical_key, ingredient_id;
+        """)
+    return {row[0]: row[1] for row in cur.fetchall()}
+
+
+def _seed_w1_w2_dryness(conn: psycopg.Connection, hyaluronic_id: int, niacinamide_id: int) -> None:
+    """W1(히알루론산 -[ACHIEVES]-> 보습 -[TREATS]-> dryness) +
+    W2(나이아신아마이드 -[TREATS]-> dryness) 트리플을 멱등 적재한다(graphrag_slice.py 패턴:
+    노드는 각각 MERGE로 먼저 바인딩, 관계 속성은 별도 MATCH+SET)."""
+    choke.age_exec(
+        conn,
+        None,
+        "MERGE (i:Ingredient {ingredient_id: $id}) SET i.name_ko = $name",
+        {"id": hyaluronic_id, "name": "테스트히알루론산"},
+    )
+    choke.age_exec(conn, None, "MERGE (m:Mechanism {name: $name})", {"name": "보습"})
+    choke.age_exec(
+        conn,
+        None,
+        "MERGE (c:Concern {name: $name}) SET c.label = $label",
+        {"name": "dryness", "label": "건조"},
+    )
+    choke.age_exec(
+        conn,
+        None,
+        "MERGE (i:Ingredient {ingredient_id: $id}) MERGE (m:Mechanism {name: $mech}) "
+        "MERGE (i)-[:ACHIEVES]->(m)",
+        {"id": hyaluronic_id, "mech": "보습"},
+    )
+    choke.age_exec(
+        conn,
+        None,
+        "MATCH (i:Ingredient {ingredient_id: $id})-[r:ACHIEVES]->(m:Mechanism {name: $mech}) "
+        "SET r.source_doc_ids = $docs, r.origin = 'manual', r.confidence = 1.0",
+        {"id": hyaluronic_id, "mech": "보습", "docs": [9101]},
+    )
+    choke.age_exec(
+        conn,
+        None,
+        "MERGE (m:Mechanism {name: $mech}) MERGE (c:Concern {name: $concern}) "
+        "MERGE (m)-[:TREATS]->(c)",
+        {"mech": "보습", "concern": "dryness"},
+    )
+    choke.age_exec(
+        conn,
+        None,
+        "MATCH (m:Mechanism {name: $mech})-[r:TREATS]->(c:Concern {name: $concern}) "
+        "SET r.source_doc_ids = $docs, r.origin = 'manual', r.confidence = 1.0",
+        {"mech": "보습", "concern": "dryness", "docs": [9102]},
+    )
+
+    choke.age_exec(
+        conn,
+        None,
+        "MERGE (i:Ingredient {ingredient_id: $id}) SET i.name_ko = $name",
+        {"id": niacinamide_id, "name": "테스트나이아신아마이드"},
+    )
+    choke.age_exec(
+        conn,
+        None,
+        "MERGE (i:Ingredient {ingredient_id: $id}) MERGE (c:Concern {name: $concern}) "
+        "MERGE (i)-[:TREATS]->(c)",
+        {"id": niacinamide_id, "concern": "dryness"},
+    )
+    choke.age_exec(
+        conn,
+        None,
+        "MATCH (i:Ingredient {ingredient_id: $id})-[r:TREATS]->(c:Concern {name: $concern}) "
+        "SET r.source_doc_ids = $docs, r.origin = 'manual', r.confidence = 1.0",
+        {"id": niacinamide_id, "concern": "dryness", "docs": [9103]},
+    )
+
+
+def test_recognize_concern_from_query_keywords() -> None:
+    """질의 키워드로 고민 코드를 인식한다(순수 함수, DB 불필요)."""
+    assert recognize_concern("여드름에 좋은 제품 추천해줘") == "acne"
+    assert recognize_concern("건조해서 보습 제품 찾아요") == "dryness"
+    assert recognize_concern("모공이 넓어져서 고민이에요") == "pores"
+    assert recognize_concern("오늘 날씨가 참 좋네요") is None
+
+
+def test_traverse_w1_w2_metapaths_and_rationale(db_conn: psycopg.Connection) -> None:
+    """질의에서 인식한 고민을 기점으로 W1·W2 경로와 근거 문서(source_doc_ids)가
+    함께 조립되고, generate_rationale_from_path 가 자연어 이유를 만드는지 검증한다."""
+    with db_conn.cursor() as cur:
+        _ensure_graph_labels(cur)
         cur.execute("SET LOCAL search_path = public;")
-        cur.execute("""
-            INSERT INTO ingredients (canonical_key, name_ko, intro)
-            VALUES 
-            (
-                'test_hyaluronic_acid', 
-                '테스트히알루론산', 
-                '피부에 강력한 수분을 공급하여 건조함을 예방하고 보습력을 올립니다.'
-            ),
-            (
-                'test_ethanol', 
-                '테스트에탄올', 
-                '피부에 강력한 보습 효과를 주어 건조함을 해결하지만, '
-                '지속 사용 시 자극 유발 및 붉어짐 '
-                '문제가 발생할 수 있어 민감한 피부는 주의할 것.'
-            ),
-            ('retinol', '레티놀', '주름을 개선함.'),
-            ('alcohol', '에탄올', '에탄올 용제.')
-            ON CONFLICT (canonical_key) DO UPDATE 
-            SET name_ko = EXCLUDED.name_ko, intro = EXCLUDED.intro
-            RETURNING canonical_key, ingredient_id;
-            """)
-        ing_map = {row[0]: row[1] for row in cur.fetchall()}
-        hyaluronic_id = ing_map["test_hyaluronic_acid"]
-        ethanol_id = ing_map["test_ethanol"]
+        ing_map = _seed_ingredients(cur)
+    hyaluronic_id = ing_map["test_gr_hyaluronic"]
+    niacinamide_id = ing_map["test_gr_niacinamide"]
 
-        cur.execute("""
-            INSERT INTO products (name, brand, description)
-            VALUES 
-                ('테스트 에멀전', '테스트브랜드', '수분 에멀전'),
-                ('테스트 오일', '테스트브랜드', '자극 에탄올 오일')
-            RETURNING name, product_id;
-            """)
-        prod_map = {row[0]: row[1] for row in cur.fetchall()}
-        emulsion_id = prod_map["테스트 에멀전"]
-        oil_id = prod_map["테스트 오일"]
+    _seed_w1_w2_dryness(db_conn, hyaluronic_id, niacinamide_id)
+    db_conn.commit()
 
-        # 제품 성분 junction 테이블 매핑
-        cur.execute(f"""
-            INSERT INTO product_ingredients (product_id, ingredient_id) VALUES
-            ({emulsion_id}, {hyaluronic_id}),
-            ({oil_id}, {ethanol_id});
-            """)
+    paths = traverse_recommendation_paths(
+        db_conn, user_id=1, query="건조한 피부에 좋은 성분 추천해줘"
+    )
 
-        # 3. 사용자 memories (회피/선호/고민) 데이터 삽입
-        # memories 조작은 RLS scope 하에서 실행해야 함
-        # 유저 1번: 기피(에탄올), 선호(히알루론산), 고민(가을 건조)
-        with db.user_scope(db_conn, 1):
-            cur.execute(f"""
-                INSERT INTO memories (
-                    user_id, content, fact_type, target_ingredient_id, 
-                    target_name, season, base_weight, frequency, last_seen
-                )
-                VALUES
-                    (1, '에탄올 피함', 'avoid_ingredient', {ethanol_id}, 
-                     NULL, NULL, 1.0, 1, NOW()),
-                    (1, '히알루론산 선호', 'prefer_ingredient', {hyaluronic_id}, 
-                     NULL, NULL, 1.0, 1, NOW()),
-                    (1, '가을철 건조', 'has_concern', NULL, 
-                     'dryness', '가을', 1.0, 1, NOW());
-                """)
-        # 유저 2번: 기피(히알루론산) → 1번의 선호성분과 격리 대치됨
-        with db.user_scope(db_conn, 2):
-            cur.execute(f"""
-                INSERT INTO memories (
-                    user_id, content, fact_type, target_ingredient_id, 
-                    target_name, season, base_weight, frequency, last_seen
-                )
-                VALUES
-                    (2, '히알루론산 기피', 'avoid_ingredient', {hyaluronic_id}, 
-                     NULL, NULL, 1.0, 1, NOW());
-                """)
+    # W1: [Concern, Mechanism, Ingredient]
+    w1_paths = [p for p in paths if len(p.nodes) == 3]
+    matching_w1 = [p for p in w1_paths if p.nodes[2].key == str(hyaluronic_id)]
+    assert matching_w1, "W1(히알루론산→보습→건조) 경로가 없음"
+    p1 = matching_w1[0]
+    assert p1.nodes[0].kind == NodeKind.CONCERN
+    assert p1.nodes[0].key == "dryness"
+    assert p1.nodes[0].label == "건조"
+    assert p1.nodes[1].kind == NodeKind.MECHANISM
+    assert p1.nodes[1].key == "보습"
+    assert p1.nodes[2].kind == NodeKind.INGREDIENT
+    assert p1.nodes[2].label == "테스트히알루론산"
 
-    # 4. 전역 지식 및 사용자 memories 그래프 투영 실행
-    populate_global_knowledge(db_conn)
+    achieves_edge = next(e for e in p1.edges if e.rel == EdgeRel.ACHIEVES)
+    assert achieves_edge.from_idx == 2
+    assert achieves_edge.to_idx == 1
+    assert achieves_edge.source_doc_ids == [9101]
+    treats_edge = next(e for e in p1.edges if e.rel == EdgeRel.TREATS)
+    assert treats_edge.from_idx == 1
+    assert treats_edge.to_idx == 0
+    assert treats_edge.source_doc_ids == [9102]
 
-    # 5. 유저 1번 그래프 2+hop 순회 및 근거 문장 생성 검증
-    paths_user1 = traverse_recommendation_paths(db_conn, user_id=1, season="가을")
+    rationale_w1 = generate_rationale_from_path(p1)
+    assert "테스트히알루론산" in rationale_w1
+    assert "보습" in rationale_w1
+    assert "건조" in rationale_w1
 
-    # 순회 경로 수집 확인
-    avoid_paths = [p for p in paths_user1 if EdgeRel.AVOIDS in {e.rel for e in p.edges}]
-    prefer_paths = [p for p in paths_user1 if EdgeRel.PREFERS in {e.rel for e in p.edges}]
-    treat_paths = [p for p in paths_user1 if EdgeRel.HAS_CONCERN in {e.rel for e in p.edges}]
-    alt_paths = [p for p in paths_user1 if len(p.nodes) == 5]
+    # W2: [Concern, Ingredient]
+    w2_paths = [p for p in paths if len(p.nodes) == 2]
+    matching_w2 = [p for p in w2_paths if p.nodes[1].key == str(niacinamide_id)]
+    assert matching_w2, "W2(나이아신아마이드→건조) 경로가 없음"
+    p2 = matching_w2[0]
+    assert p2.nodes[0].kind == NodeKind.CONCERN
+    assert p2.nodes[1].kind == NodeKind.INGREDIENT
+    assert p2.nodes[1].label == "테스트나이아신아마이드"
+    treats_edge2 = next(e for e in p2.edges if e.rel == EdgeRel.TREATS)
+    assert treats_edge2.from_idx == 1
+    assert treats_edge2.to_idx == 0
+    assert treats_edge2.source_doc_ids == [9103]
 
-    # 가. Avoidance Path 검증 (기피하는 에탄올이 든 오일 제품)
-    assert len(avoid_paths) >= 1
-    p_avoid = avoid_paths[0]
-    assert p_avoid.nodes[0].kind == NodeKind.USER
-    assert p_avoid.nodes[1].key == "test_ethanol"
-    assert p_avoid.nodes[2].key == str(oil_id)
-    rationale_avoid = generate_rationale_from_path(p_avoid)
-    assert "기피 성분" in rationale_avoid
-    assert "테스트에탄올" in rationale_avoid
-
-    # 나. Preference Path 검증 (선호하는 히알루론산이 든 에멀전 제품)
-    assert len(prefer_paths) >= 1
-    p_prefer = prefer_paths[0]
-    assert p_prefer.nodes[1].key == "test_hyaluronic_acid"
-    assert p_prefer.nodes[2].key == str(emulsion_id)
-    rationale_prefer = generate_rationale_from_path(p_prefer)
-    assert "선호하시는" in rationale_prefer
-    assert "테스트히알루론산" in rationale_prefer
-
-    # 다. Treatment Path 검증 (가을철 dryness 고민 완화)
-    target_treat_paths = [p for p in treat_paths if p.nodes[3].key == str(emulsion_id)]
-    assert len(target_treat_paths) >= 1
-    p_treat = target_treat_paths[0]
-    assert p_treat.nodes[1].key == "dryness"
-    assert p_treat.nodes[2].key == "test_hyaluronic_acid"
-    assert p_treat.nodes[3].key == str(emulsion_id)
-    # 엣지 프로퍼티 season 검증
-    concern_edge = next(e for e in p_treat.edges if e.rel == EdgeRel.HAS_CONCERN)
-    assert concern_edge.season == "가을"
-    rationale_treat = generate_rationale_from_path(p_treat)
-    assert "가을철 고민인" in rationale_treat
-    assert "건조" in rationale_treat or "dryness" in rationale_treat
-
-    # 라. Alternative Path 검증 (기피하는 에탄올 대신 건조를 해결하는 대안인 히알루론산 에멀전 추천)
-    target_alt_paths = [p for p in alt_paths if p.nodes[4].key == str(emulsion_id)]
-    assert len(target_alt_paths) >= 1
-    p_alt = target_alt_paths[0]
-    assert p_alt.nodes[1].key == "test_ethanol"
-    assert p_alt.nodes[2].key == "dryness"
-    assert p_alt.nodes[3].key == "test_hyaluronic_acid"
-    assert p_alt.nodes[4].key == str(emulsion_id)
-    rationale_alt = generate_rationale_from_path(p_alt)
-    assert "대체 성분" in rationale_alt
-    assert "테스트에탄올" in rationale_alt
-    assert "테스트히알루론산" in rationale_alt
-
-    # 6. 유저 격리 및 0-row leakage 검증 (AC-G3)
-    # 유저 2번 순회 결과 검증
-    paths_user2 = traverse_recommendation_paths(db_conn, user_id=2)
-
-    # 유저 2번의 기피성분 경로
-    avoid_paths_user2 = [p for p in paths_user2 if EdgeRel.AVOIDS in {e.rel for e in p.edges}]
-    assert len(avoid_paths_user2) >= 1
-    # 유저 2번의 기피 성분은 히알루론산이어야 함
-    assert avoid_paths_user2[0].nodes[1].key == "test_hyaluronic_acid"
-    assert avoid_paths_user2[0].nodes[2].key == str(emulsion_id)
-
-    # 0-row leakage: 유저 2번의 순회결과에 유저 1번 개인의
-    # 선호성분/고민 엣지가 절대 섞이지 않았는지 검증
-    prefer_paths_user2 = [p for p in paths_user2 if EdgeRel.PREFERS in {e.rel for e in p.edges}]
-    treat_paths_user2 = [p for p in paths_user2 if EdgeRel.HAS_CONCERN in {e.rel for e in p.edges}]
-
-    # 유저 2번은 선호성분과 고민이 등록되어 있지 않으므로 0건이어야 함
-    assert len(prefer_paths_user2) == 0
-    assert len(treat_paths_user2) == 0
+    rationale_w2 = generate_rationale_from_path(p2)
+    assert "테스트나이아신아마이드" in rationale_w2
+    assert "건조" in rationale_w2
 
 
-def test_traverse_cache_read_through_and_invalidation(db_conn: psycopg.Connection) -> None:
-    """Read-Through 캐시가 동작하며, memories 변경 및 populate 시 무효화되는지 검증합니다."""
-    # 1. 테스트 셋업 (테스트 데이터 삽입)
+def test_traverse_no_concern_recognized_returns_empty(db_conn: psycopg.Connection) -> None:
+    """질의에 고민 키워드가 없고 사용자 HAS_CONCERN 기억도 없으면 빈 리스트를 반환한다."""
+    paths = traverse_recommendation_paths(db_conn, user_id=555001, query="오늘 기분이 좋아요")
+    assert paths == []
+
+
+def test_traverse_concern_fallback_from_has_concern_memory(db_conn: psycopg.Connection) -> None:
+    """질의에 고민 키워드가 없어도 사용자의 HAS_CONCERN 기억(한글 라벨 저장 관례)으로
+    폴백 인식해 W1/W2 순회를 수행한다."""
     with db_conn.cursor() as cur:
+        _ensure_graph_labels(cur)
         cur.execute("SET LOCAL search_path = public;")
-        cur.execute("""
-            INSERT INTO ingredients (canonical_key, name_ko, intro)
-            VALUES 
-            ('test_cache_ingredient', '테스트캐시성분', '피부 보습에 도움을 줍니다.')
-            ON CONFLICT (canonical_key) DO UPDATE SET name_ko = EXCLUDED.name_ko
-            RETURNING ingredient_id;
-            """)
-        ing_id = cur.fetchone()[0]
+        ing_map = _seed_ingredients(cur)
+    hyaluronic_id = ing_map["test_gr_hyaluronic"]
+    niacinamide_id = ing_map["test_gr_niacinamide"]
+    _seed_w1_w2_dryness(db_conn, hyaluronic_id, niacinamide_id)
+    db_conn.commit()
 
-        cur.execute("""
-            INSERT INTO products (name, brand, description)
-            VALUES ('테스트캐시제품', '캐시브랜드', '캐시용 수분 크림')
-            RETURNING product_id;
-            """)
-        prod_id = cur.fetchone()[0]
-
-        cur.execute(f"""
-            INSERT INTO product_ingredients (product_id, ingredient_id)
-            VALUES ({prod_id}, {ing_id});
-            """)
-
-        # 유저 999: memories 등록 (RLS scope 하에서)
-        with db.user_scope(db_conn, 999):
-            cur.execute(f"""
-                INSERT INTO memories (
-                    user_id, content, fact_type, target_ingredient_id, 
-                    target_name, season, base_weight, frequency, last_seen
-                )
-                VALUES
-                    (999, '캐시성분 선호', 'prefer_ingredient', {ing_id}, 
-                     NULL, NULL, 1.0, 1, NOW());
-                """)
-
-    # 전역 지식 적재 (그래프 투영 및 캐시 Truncate 발생)
-    populate_global_knowledge(db_conn)
-
-    # 2. 최초 조회 (캐시 미스 -> Cypher 실행 -> 캐시 테이블 적재)
-    paths_1 = traverse_recommendation_paths(db_conn, user_id=999)
-    assert len(paths_1) >= 1
-
-    # 캐시 테이블에 적재되었는지 확인
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "SELECT paths_json FROM public.traverse_cache " "WHERE user_id = 999 AND season = '';"
+    uid = 555002
+    with db.user_scope(db_conn, uid):
+        fact = ExtractedFact(
+            fact_type=FactType.HAS_CONCERN, content="건조한 편이에요", target_name="건조"
         )
-        row = cur.fetchone()
-        assert row is not None
-        import json
+        decision = CrudDecision(op=CrudOp.ADD, fact=fact)
+        crud.apply_decision(db_conn, uid, decision)
 
-        cached_data = row[0]
-        if isinstance(cached_data, str):
-            cached_data = json.loads(cached_data)
-        assert len(cached_data) == len(paths_1)
-        assert cached_data[0]["nodes"][1]["key"] == "test_cache_ingredient"
-
-    # 3. 두 번째 조회 (캐시 히트)
-    # 캐시 데이터를 변경하여 두 번째 조회 시 캐시에서 나가는지 모킹 검증
-    with db_conn.cursor() as cur:
-        mock_paths = [
-            {
-                "nodes": [
-                    {"kind": "User", "key": "999", "label": "사용자"},
-                    {"kind": "Ingredient", "key": "mocked_ingredient", "label": "모킹성분"},
-                    {"kind": "Product", "key": "999", "label": "모킹제품"},
-                ],
-                "edges": [
-                    {"rel": "PREFERS", "from_idx": 0, "to_idx": 1},
-                    {"rel": "CONTAINS", "from_idx": 2, "to_idx": 1},
-                ],
-            }
-        ]
-        cur.execute(
-            "UPDATE public.traverse_cache SET paths_json = %s "
-            "WHERE user_id = 999 AND season = '';",
-            (json.dumps(mock_paths),),
-        )
-
-    paths_2 = traverse_recommendation_paths(db_conn, user_id=999)
-    assert len(paths_2) == 1
-    # 캐시에서 가져왔으므로 'mocked_ingredient'이어야 함
-    assert paths_2[0].nodes[1].key == "mocked_ingredient"
-
-    # 4. memories 수정에 따른 캐시 무효화(Invalidation) 검증 (트리거 동작)
-    with db_conn.cursor() as cur, db.user_scope(db_conn, 999):
-        cur.execute("""
-                UPDATE memories 
-                SET frequency = 2 
-                WHERE user_id = 999 AND fact_type = 'prefer_ingredient';
-            """)
-
-    # 트리거에 의해 캐시 행이 삭제되었는지 검증
-    with db_conn.cursor() as cur:
-        cur.execute("SELECT 1 FROM public.traverse_cache WHERE user_id = 999 AND season = '';")
-        assert cur.fetchone() is None
-
-    # 5. populate_global_knowledge 수행 시 전체 캐시 Truncate 검증
-    # 캐시 강제 삽입
-    with db_conn.cursor() as cur:
-        cur.execute("""
-            INSERT INTO public.traverse_cache (user_id, season, paths_json)
-            VALUES (999, '', '[]');
-        """)
-
-    # populate_global_knowledge 실행
-    populate_global_knowledge(db_conn)
-
-    # 캐시가 Truncate 되었는지 검증
-    with db_conn.cursor() as cur:
-        cur.execute("SELECT 1 FROM public.traverse_cache WHERE user_id = 999 AND season = '';")
-        assert cur.fetchone() is None
-
-    # 6. RLS 격리(Row Level Security) 검증
-    # 999번 캐시 삽입
-    with db_conn.cursor() as cur:
-        cur.execute("""
-            INSERT INTO public.traverse_cache (user_id, season, paths_json)
-            VALUES (999, '', '[]');
-        """)
-
-    # RLS 시뮬레이션: role을 skinmate_app으로 변경하고 app.current_user_id 설정
-    with db_conn.cursor() as cur:
-        cur.execute("SET ROLE skinmate_app;")
-        cur.execute("SELECT set_config('app.current_user_id', '999', true);")
-        cur.execute("SELECT user_id FROM public.traverse_cache;")
-        rows = cur.fetchall()
-        assert len(rows) == 1
-        assert rows[0][0] == 999
-
-        # 다른 유저인 것처럼 스코프 변경
-        cur.execute("SELECT set_config('app.current_user_id', '888', true);")
-        cur.execute("SELECT user_id FROM public.traverse_cache;")
-        rows_other = cur.fetchall()
-        assert len(rows_other) == 0  # 888번 유저 캐시는 없으므로 0행이어야 함
-
-        # 롤백을 위해 role을 다시 superuser로 복원
-        cur.execute("RESET ROLE;")
+    paths = traverse_recommendation_paths(db_conn, user_id=uid, query="이거 괜찮을까요?")
+    assert any(
+        p.nodes[0].key == "dryness" for p in paths
+    ), "HAS_CONCERN 기억(라벨 저장)으로부터 고민 폴백 인식이 되지 않음"

@@ -70,19 +70,22 @@ def main() -> None:
     with db.user_scope(conn, 1001):
         conn.execute("DELETE FROM public.traverse_cache WHERE user_id = 1001;")
 
+    # 개념 기반 메타패스(W1/W2) 전환으로 read-through 캐시는 현재 비활성화되어 있다
+    # (graph/traverse.py 참고) — 아래 콜드/웜 구분은 더 이상 캐시 히트를 의미하지 않고,
+    # 순수 W1/W2 순회 반복 실행 타이밍만 보여준다.
     cold_start = time.perf_counter()
     with db.user_scope(conn, 1001):
-        traverse_recommendation_paths(conn, user_id=1001, season="가을")
+        traverse_recommendation_paths(conn, user_id=1001, query=_QUERIES[0], season="가을")
     cold_ms = (time.perf_counter() - cold_start) * 1000
-    print(f"[traverse_recommendation_paths 콜드(캐시 미스)] {cold_ms:.1f}ms")
+    print(f"[traverse_recommendation_paths 1회] {cold_ms:.1f}ms")
 
     warm_durations: list[float] = []
     for _ in range(20):
         start = time.perf_counter()
         with db.user_scope(conn, 1001):
-            traverse_recommendation_paths(conn, user_id=1001, season="가을")
+            traverse_recommendation_paths(conn, user_id=1001, query=_QUERIES[0], season="가을")
         warm_durations.append((time.perf_counter() - start) * 1000)
-    _report("traverse_recommendation_paths 웜(캐시 히트)", warm_durations, 400.0)
+    _report("traverse_recommendation_paths 반복", warm_durations, 400.0)
 
     conn.close()
 
