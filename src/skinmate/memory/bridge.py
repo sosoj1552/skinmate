@@ -105,9 +105,37 @@ def project_to_graph(
         return
 
     if fact.fact_type in INGREDIENT_FACT_TYPES:
-        _project_labeled(
-            conn, user_id, decision, "Ingredient", "canonical_key", ingredient_key, _INGREDIENT_EDGE
-        )
+        keys = []
+        if ingredient_key:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    WITH target AS (
+                        SELECT canonical_key, name_ko 
+                        FROM ingredients 
+                        WHERE canonical_key = %s
+                    )
+                    SELECT DISTINCT i.canonical_key 
+                    FROM ingredients i
+                    JOIN target t
+                      ON i.canonical_key = t.canonical_key
+                      OR i.canonical_key = t.name_ko
+                      OR t.canonical_key = i.name_ko
+                      OR i.name_ko = t.name_ko
+                      OR i.name_ko LIKE t.name_ko || '(%%'
+                      OR t.name_ko LIKE i.name_ko || '(%%'
+                      OR lower(i.canonical_key) = lower(t.canonical_key);
+                    """,
+                    (ingredient_key,),
+                )
+                keys = [row[0] for row in cur.fetchall()]
+        else:
+            keys = [None]
+
+        for key in keys:
+            _project_labeled(
+                conn, user_id, decision, "Ingredient", "canonical_key", key, _INGREDIENT_EDGE
+            )
     elif fact.fact_type in BRAND_FACT_TYPES:
         _project_labeled(conn, user_id, decision, "Brand", "name", fact.target_name, _BRAND_EDGE)
     elif fact.fact_type == FactType.HAS_CONCERN:

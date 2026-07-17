@@ -32,3 +32,4 @@ class ProductRef(BaseModel):
     brand: str | None = None
     category: str | None = None
     description: str | None = None
+    ingredients: list[str] = []
